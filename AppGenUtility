@@ -1,0 +1,3197 @@
+package com.accenture.sc.utility;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.math.BigInteger;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+import javax.mail.BodyPart;
+import javax.mail.internet.MimeMultipart;
+import javax.mail.util.ByteArrayDataSource;
+import javax.servlet.ServletContext;
+
+import org.apache.commons.lang3.StringUtils;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.tomcat.util.codec.binary.Base64;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
+import org.springframework.web.client.RestTemplate;
+
+import com.accenture.bpmn.xml.ReadYaml;
+import com.accenture.bpmn.xml.ReadYaml.Attributes;
+import com.accenture.bpmn.xml.ReadYaml.Parameter;
+import com.accenture.cpiAnalyser.model.IFlow;
+import com.accenture.sc.constant.AppGenConstant;
+import com.accenture.sc.poTenants.model.PoTenant;
+import com.accenture.sc.template.model.BPMNDiagram;
+import com.accenture.sc.ui.model.Tenants;
+import com.accenture.soap.model.Mapping;
+import com.accenture.soap.model.MappingParameter;
+import com.accenture.soap.model.OperationMapping;
+import com.accenture.valueMapping.model.ValueMappingMig;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+@Component
+public class AppGenUtility {
+	@Autowired
+	private BPMNDiagram bpmnDiagram;
+
+	@Autowired
+	private ReadYaml readYaml;
+	
+
+	
+	private static Logger logger = LoggerFactory.getLogger(AppGenUtility.class);
+
+	public static HttpHeaders getCsrfToken(String tntURL, String authorisation) {
+		HttpHeaders headers = new HttpHeaders();
+		// String base64Creds = new String(Base64.encodeBase64((userName + ":" +
+		// password).getBytes()));
+
+		headers.add("Authorization", "Basic " + authorisation);
+		headers.add("x-csrf-token", "Fetch");
+		HttpEntity<String> request = new HttpEntity<>(headers);
+
+		return new RestTemplate()
+				.exchange(tntURL.concat(AppGenConstant.CSRF_TOKEN_FETCH_API), HttpMethod.GET, request, String.class)
+				.getHeaders();
+	}
+
+	public static HttpEntity<String> setHeaders(String csrfToken, String cookie, String authorisation,
+			String requestJson) {
+		HttpHeaders headers = new HttpHeaders();
+		// String base64Creds = new String(Base64.encodeBase64((userName + ":" +
+		// password).getBytes()));
+
+		headers.add("Authorization", "Basic " + authorisation);
+
+		if (csrfToken != null)
+			headers.add("x-csrf-token", csrfToken);
+
+		if (cookie != null)
+			headers.add("cookie", cookie);
+		headers.add("Content-Type", "application/json");
+
+		return new HttpEntity<>(requestJson, headers);
+	}
+
+	public static byte[] writeExcelFile(List<IFlow> iflowList) throws Exception {
+		ByteArrayOutputStream bos = null;
+		Workbook workbook = null;
+
+		try {
+			InputStream stream = ClassLoader
+					.getSystemResourceAsStream("templates/".concat(AppGenConstant.IFLOW_FILE_NAME));
+			workbook = new XSSFWorkbook(stream);
+			Sheet sheet = workbook.getSheetAt(0);
+
+			int rowIndex = 1;
+
+			if (!CollectionUtils.isEmpty(iflowList)) {
+				for (IFlow iflowObj : iflowList) {
+					Row row = sheet.createRow(rowIndex);
+					row.createCell(0).setCellValue(Objects.isNull(iflowObj.getId()) ? "" : iflowObj.getId());
+
+					row.createCell(1).setCellValue(Objects.isNull(iflowObj.getVersion()) ? "" : iflowObj.getVersion());
+
+					rowIndex++;
+				}
+			}
+
+			bos = new ByteArrayOutputStream();
+			workbook.write(bos);
+
+			return bos.toByteArray();
+		} catch (IOException e) {
+			throw new IOException();
+		} catch (Exception e) {
+			throw new Exception();
+		} finally {
+			if (bos != null)
+				bos.close();
+
+			if (workbook != null)
+				workbook.close();
+		}
+	}
+
+
+	public static MediaType getMediaTypeForFileName(ServletContext servletContext, String fileName) {
+		String mineType = servletContext.getMimeType(fileName);
+		try {
+			MediaType mediaType = MediaType.parseMediaType(mineType);
+			return mediaType;
+		} catch (Exception e) {
+			return MediaType.APPLICATION_OCTET_STREAM;
+		}
+	}
+
+	public static byte[] expotTblDataToExcelFile(List<IFlow> iflowList) throws Exception {
+		ByteArrayOutputStream bos = null;
+		FileOutputStream out = null;
+		Workbook workbook = null;
+
+		try {
+			InputStream stream = ClassLoader
+					.getSystemResourceAsStream("templates/".concat(AppGenConstant.EXPORT_FILE_NAME));
+			workbook = new XSSFWorkbook(stream);
+			Sheet sheet = workbook.getSheetAt(0);
+
+			int rowIndex = 1;
+
+			if (!CollectionUtils.isEmpty(iflowList)) {
+				for (IFlow iflowObj : iflowList) {
+					Row row = sheet.createRow(rowIndex);
+					row.createCell(0).setCellValue(Objects.isNull(iflowObj.getId()) ? "" : iflowObj.getId());
+
+					row.createCell(1).setCellValue(Objects.isNull(iflowObj.getVersion()) ? "" : iflowObj.getVersion());
+
+					rowIndex++;
+				}
+			}
+
+			bos = new ByteArrayOutputStream();
+			workbook.write(bos);
+
+			FileOutputStream output = new FileOutputStream(
+					new ClassPathResource("templates/".concat(AppGenConstant.EXPORT_FILE_NAME)).getFile());
+			workbook.write(output);
+			output.close();
+			return bos.toByteArray();
+		} catch (IOException e) {
+			throw new IOException();
+		} catch (Exception e) {
+			throw new Exception();
+		} finally {
+			if (bos != null)
+				bos.close();
+
+			if (workbook != null)
+				workbook.close();
+		}
+	}
+
+	public static String getServerRootPath() {
+		//System.out.println(System.getProperty("user.home"));
+		return System.getProperty("user.home");
+	}
+
+	public static String getZipFilePath(String projectName, long projectId, long IcoId, long poTenantId) {
+		final File file = new File(AppGenConstant.CPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator + "Ico_" + IcoId);
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getZipFilePath :: ", e);
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+
+	public static String getZipFilePathForSenderAgreement(String projectName, long projectId, long IcoId, long poTenantId , long receiverIcoId) {
+		final File file = new File(AppGenConstant.CPI_FOLDER_PATH
+				+ File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId
+				+ File.separator + "Ico_" + receiverIcoId
+				+ File.separator + "Ico_sender_agreement_" + IcoId);
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getZipFilePath :: ", e);
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	public static String getZipFilePath(String projectName, int projectId, int pId, int tenantId) {
+		final File file = new File(AppGenConstant.BOOMI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + tenantId + File.separator + "process_" + pId);
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getZipFilePath :: ", e);
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	public static String getZipFilePathMule(String projectName, long projectId,long poTenantId,int mainId) {
+		final File file = new File(AppGenConstant.MuleCPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator +mainId);
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	
+	public static String getZipFilePath2(String projectName, long projectId, long icoId, long poTenantId) {
+		final File file = new File("Assessment" + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator + "Ico_" + icoId);
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getZipFilePath :: ", e);
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+
+	public static String getFilePathIflow(String projectName, long projectId, long IcoId, long poTenantId) {
+		final File file = new File(AppGenConstant.CPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator + "Ico_" + IcoId + File.separator
+				+ "Ico_" + IcoId + "_Iflow");
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+
+	public static String getFilePathIflowForSenderAgreement(String projectName, long projectId, long IcoId, long poTenantId, long receiverIcoId) {
+		final File file = new File(AppGenConstant.CPI_FOLDER_PATH + File.separator
+				+ projectName + "_" + projectId + File.separator
+				+ projectName + "_" + poTenantId + File.separator
+				+ "Ico_" + receiverIcoId + File.separator
+				+ "Ico_sender_agreement_" + IcoId + File.separator
+				+ "Ico_" + IcoId + "_Iflow");
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+
+	public static String getFilePathMMap(String projectName, long projectId, long IcoId, long poTenantId,String mmName) {
+		final File file = new File(AppGenConstant.CPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator + "Ico_" + IcoId,File.separator+ mmName+"_MMap");
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	
+	public static String getFilePathChannel(String projectName, long projectId, long IcoId, long poTenantId,String channel, String direction) {
+		final File file = new File(AppGenConstant.CPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator + "Ico_" + IcoId,File.separator+ channel+"_"+direction+"_Scripts");
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	
+	public static String getFilePathIflowMule(String projectName, long projectId,long poTenantId,int mainId) {
+		final File file = new File(AppGenConstant.MuleCPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator +mainId+File.separator+"Jar Folder");
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	
+	public static String getFilePathBoomi(String projectName, int projectId, int pId, int tenantId) {
+		final File file = new File(AppGenConstant.BOOMI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + tenantId + File.separator + "process_" + pId + File.separator
+				+ "process_" + pId + "_Iflow");
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	
+	public static String getFilePathJMSIflow(String projectName, long projectId, long IcoId, long poTenantId) {
+		final File file = new File(AppGenConstant.CPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator + "Ico_" + IcoId + File.separator
+				+ "JMS_" + IcoId + "_Iflow");
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+
+	public static String getFilePathToDelete(String projectName, long projectId, long poTenantId) {
+		final File file = new File(AppGenConstant.CPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId);
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getFilePathToDelete :: ", e);
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	
+	public static String getFilePathToDelete(String projectName, int projectId, int tenantId) {
+		final File file = new File(AppGenConstant.BOOMI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + tenantId );
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getFilePathToDelete :: ", e);
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+
+	public static String getFilePathVM(String projectName, long projectId, long vmIflowId, long tenantId, ValueMappingMig vmMig) {
+		final File file;
+		if(vmMig ==null){
+			file = new File(AppGenConstant.VM_FOLDER_PATH
+					+ File.separator + projectName + "_" + projectId
+					+ File.separator + projectName + "_" + tenantId);
+//					+ File.separator + "VM_"+ vmIflowId);
+		}else{
+			file = new File(AppGenConstant.VM_FOLDER_PATH
+					+ File.separator + projectName + "_" + projectId
+					+ File.separator + projectName + "_" + tenantId
+					+ File.separator + "VM_"+ vmIflowId + "_" + vmMig);
+		}
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+	
+	public static String getFilePathIflow2(String projectName, long projectId,long poTenantId,int mainFLowId) {
+		final File file = new File(AppGenConstant.MuleCPI_FOLDER_PATH + File.separator + projectName + "_" + projectId
+				+ File.separator + projectName + "_" + poTenantId + File.separator +mainFLowId+ File.separator +"ICO_Folder");
+		String path = "";
+		try {
+			if (!file.exists()) {
+				file.mkdirs();
+			}
+			path = file.getCanonicalPath();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return path;
+	}
+
+
+	public static void copyDirectory(File sourceDirectory, File destinationDirectory) throws IOException {
+		try {
+			if (!destinationDirectory.exists()) {
+				destinationDirectory.mkdir();
+			}
+			for (String f : sourceDirectory.list()) {
+				copyDirectoryCompatibityMode(new File(sourceDirectory, f), new File(destinationDirectory, f));
+			}
+		} catch (Exception e) {
+			logger.error("AppGenUtility :::: copyDirectory :: ", e);
+			e.printStackTrace();
+			throw e;
+		}
+	}
+
+	public static void copyDirectoryCompatibityMode(File source, File destination) throws IOException {
+		if (source.isDirectory()) {
+			copyDirectory(source, destination);
+		} else {
+			copyFile(source, destination);
+		}
+	}
+
+	private static void copyFile(File sourceFile, File destinationFile) throws IOException {
+		try (InputStream in = new FileInputStream(sourceFile);
+				OutputStream out = new FileOutputStream(destinationFile)) {
+			byte[] buf = new byte[1024];
+			int length;
+			while ((length = in.read(buf)) > 0) {
+				out.write(buf, 0, length);
+			}
+		}
+	}
+
+	public static void deleteFolder(File file) {
+		File[] list = file.listFiles();
+		if (list != null) {
+			for (File temp : list) {
+				// recursive delete
+				deleteFolder(temp);
+			}
+		}
+
+		if (file.delete()) {
+		} else {
+			logger.error("AppGenUtility :::: deleteFolder :: Unable to delete file or directory : %s%n", file);
+			System.err.printf("Unable to delete file or directory : %s%n", file);
+		}
+	}
+
+	public static Map<String, String> propertyFileRead(String Filepath, String Filename) {
+		try {
+			File file = new File(Filepath + '\\' + Filename);
+			FileInputStream fileInput = new FileInputStream(file);
+			Properties properties = new Properties();
+			Map<String, String> map = new HashMap<>();
+			properties.load(fileInput);
+			fileInput.close();
+
+			Enumeration enuKeys = properties.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = properties.getProperty(key);
+				map.put(key, value);
+			}
+
+			return map;
+		} catch (Exception e) {
+			logger.error("AppGenUtility :::: propertyFileRead :: ", e);
+			e.printStackTrace();
+		}
+
+		return null;
+	}
+
+	public Map<String, String> propertyFileRead2() {
+		try {
+			List<Map<String, String>> configLists = this.bpmnDiagram.getConfigurablePropertyLists();
+			Map<String, String> configProperties = new HashMap<>();
+
+			for (Map<String, String> map : configLists) {
+				for (Map.Entry<String, String> entry : map.entrySet()) {
+					String key = entry.getKey();
+					String value = entry.getValue();
+					configProperties.put(key, value);
+				}
+			}
+
+			this.bpmnDiagram.setConfigurablePropertyLists(new ArrayList<Map<String,String>>());
+			return configProperties;
+		} catch (Exception e) {
+			logger.error("AppGenUtility :::: propertyFileRead2 :: ", e);
+			e.printStackTrace();
+		}
+
+		return null;
+	}
+
+	public List<Map<String, Parameter>> propertyDefFileRead() {
+		List<Map<String, Parameter>> propDef =this.bpmnDiagram.getAdapterList();
+		this.bpmnDiagram.setAdapterList(new ArrayList<Map<String, Parameter>>());
+		return propDef;
+	}
+
+	public static void propertyFileUpdate(String Filepath, String FileName, Map<String, String> ParameterList) {
+
+		FileWriter fw = null;
+		Properties properties = new Properties();
+		File file = new File(FileName);
+		try {
+
+			fw = new FileWriter(Filepath + '\\' + file);
+			BufferedWriter bw = new BufferedWriter(fw);
+			for (Map.Entry<String, String> pl : ParameterList.entrySet()) {
+				properties.setProperty(pl.getKey(), pl.getValue());
+			}
+			properties.store(bw, "");
+			bw.close();
+
+		} catch (Exception e) {
+			logger.error("AppGenUtility :::: propertyFileUpdate :: ", e);
+		}
+
+	}
+
+	public void updateMetaINFfile(List<OperationMapping> operationmappingList, String path, String checkNA) {
+		String string="Require-Capability: scriptcollection.GS_Shared_Collection;resolution:\n"
+		+ " =optional;bundleType:String=\"ScriptCollection\";source:String=\"reference\n"
+		+ " \""+ ",";
+		String result = "";
+		for (OperationMapping op : operationmappingList) {
+			List<Mapping> mapList = op.getMappingList();
+			for (Mapping map : mapList) {
+				if (map.getMessageMapping() != null) {
+					String mmName= map.getMessageMapping().getMsgMappingName();
+					if("NA".equals(checkNA)) {
+						if(mmName.startsWith("MM_"))
+							mmName= mmName.replace("MM_", "MM_NA_");
+						else
+							mmName="MM_NA_"+mmName;
+					}
+						
+					result = result + "messagemapping." + mmName + "_MMap;resolution:=optional;bundleType:String=\"MessageMapping\";source:String=\"reference\"" + ",";
+				}
+			}
+		}
+
+		if (result.endsWith(",")) {
+			result = result.substring(0, result.length() - 1);
+		}
+		File original = new File(path + "\\META-INF\\MANIFEST.MF");
+		File cleaned = new File(path + "\\META-INF\\temp_MANIFEST.MF");
+		try (BufferedReader reader = new BufferedReader(new FileReader(original));
+			 PrintWriter writer = new PrintWriter(new FileWriter(cleaned))
+		) {
+			String line;
+
+			while ((line = reader.readLine()) != null) {
+				if (!line.trim().isEmpty()) {
+					writer.println(line);
+				} else {
+					writer.println(string = string + result + "\n");
+				}
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		// Rename cleaned file back to original
+
+		if (original.delete() && cleaned.renameTo(original)) {
+			System.out.println("Extra newlines removed successfully.");
+		} else {
+			System.out.println("Failed to update the file.");
+		}
+
+//		 try (BufferedWriter writer = new BufferedWriter(new FileWriter(path+"\\META-INF\\MANIFEST.MF", true))) {
+//	            writer.newLine(); // Move to a new line
+//	            writer.write(string=string+result+"\n");
+//	            System.out.println("reference added successfully!");
+//	        } catch (IOException e) {
+//	            e.printStackTrace();
+//	        }
+		
+		
+		if("NA".equals(checkNA)) {
+					File parentDir = new File(path).getParentFile();
+					if (parentDir.isDirectory()) {
+			            File[] folders = parentDir.listFiles(file -> file.isDirectory() && file.getName().contains("_MMap"));
+
+			            if (folders != null) {
+			                for (File folder : folders) {
+			                	
+			                //rename Mappings
+			                	  File dir = new File(folder +"\\src\\main\\resources\\mapping");
+
+			          	        if (dir.isDirectory()) {
+			          	        	 File[] files1 = dir.listFiles((dir1, name) -> name.toLowerCase().endsWith(".mmap"));
+			          	         //   File[] files1 = dir.listFiles();
+			          	            if (files1 != null) {
+			          	                for (File file : files1) {
+			          	                    String fileName = file.getName();
+			          	                    String newFileName;
+			          	                    if (fileName.startsWith("MM_")) {
+			          	                         newFileName = fileName.replace("MM_", "MM_NA_");
+			          	                        
+			          	                    }else {
+			          	                    	 newFileName = "MM_NA_" + fileName;
+			          	                    }
+			          	                        File newFile = new File(dir, newFileName);
+			          	                        boolean renamed = file.renameTo(newFile);
+			          	                        if (renamed) {
+			          	                            System.out.println("Renamed: " + fileName + " -> " + newFileName);
+			          	                        } else {
+			          	                            System.out.println("Failed to rename: " + fileName);
+			          	                        }
+			          	                  
+			          	                }
+			          	            }
+			          	        }
+			          	        
+			          	        //rename folder at last
+			                    String newName = folder.getName();
+			                	if(newName.startsWith("MM_"))
+			                		newName= newName.replace("MM_", "MM_NA_");
+								else
+									newName="MM_NA_"+newName;
+			                    
+			                    File newFolder = new File(parentDir, newName);
+
+			                    if (folder.renameTo(newFolder)) {
+			                        System.out.println("Renamed: " + folder.getName() + " -> " + newName);
+			                    } 
+			                }
+			            }
+			        }
+					
+				}
+	}
+	public void updateMetaINFfileTakeda(String path) {
+		String string="Require-Capability: scriptcollection.GenericScriptCollection;resolution:\n"
+				+ " =optional;bundleType:String=\"ScriptCollection\";source:String=\"reference\n"
+				+ " \"";
+		 
+		 File original = new File(path+"\\META-INF\\MANIFEST.MF");
+	        File cleaned = new File(path+"\\META-INF\\temp_MANIFEST.MF");
+		 try (BufferedReader reader = new BufferedReader(new FileReader(original));
+		            PrintWriter writer = new PrintWriter(new FileWriter(cleaned))
+		        ) {
+		            String line;
+		            
+		            while ((line = reader.readLine()) != null) {
+		                if (!line.trim().isEmpty()) {
+		                	writer.println(line);
+		                }else {
+		                	 writer.println(string=string+"\n");
+		                }
+		            }
+		        } catch (IOException e) {
+		            e.printStackTrace();
+		        }
+
+		        // Rename cleaned file back to original
+		       
+		        if (original.delete() && cleaned.renameTo(original)) {
+		            System.out.println("Extra newlines removed successfully.");
+		        } else {
+		            System.out.println("Failed to update the file.");
+		        }
+		 
+
+	    }
+	
+	public void updateMetaINFfileDT(String path, String string2) {
+		String string="Require-Capability: scriptcollection.SC_reusableScripts;resolution:\n"
+				+ " =optional;bundleType:String=\"ScriptCollection\";source:String=\"reference\n"
+				+ " \"";
+		 
+		 File original = new File(path+"\\META-INF\\MANIFEST.MF");
+	        File cleaned = new File(path+"\\META-INF\\temp_MANIFEST.MF");
+		 try (BufferedReader reader = new BufferedReader(new FileReader(original));
+		            PrintWriter writer = new PrintWriter(new FileWriter(cleaned))
+		        ) {
+		            String line;
+		            
+		            while ((line = reader.readLine()) != null) {
+		                if (!line.trim().isEmpty()) {
+		                	writer.println(line);
+		                }else {
+		                	 writer.println(string=string+"\n");
+		                }
+		            }
+		        } catch (IOException e) {
+		            e.printStackTrace();
+		        }
+
+		        // Rename cleaned file back to original
+		       
+		        if (original.delete() && cleaned.renameTo(original)) {
+		            System.out.println("updated meta-inf");
+		        } else {
+		            System.out.println("Failed to update the file.");
+		        }
+		 
+		        //
+		        
+		         original = new File(path+"\\metainfo.prop");
+		         cleaned = new File(path+"\\temp_metainfo.prop");
+			 try (BufferedReader reader = new BufferedReader(new FileReader(original));
+			            PrintWriter writer = new PrintWriter(new FileWriter(cleaned))
+			        ) {
+			            String line;
+			            
+			            while ((line = reader.readLine()) != null) {
+			            	if (line.startsWith("description=")) {
+			            	    line = line + string2.replace(":", "\\:")
+			                    .replace("\r\n", "\\n")
+			                    .replace("\n", "\\n");
+			            	}
+			            	 writer.println(line); 
+			            }
+			        } catch (IOException e) {
+			            e.printStackTrace();
+			        }
+			 
+			 // Rename cleaned file back to original
+		       
+		        if (original.delete() && cleaned.renameTo(original)) {
+		            System.out.println("update metaprop");
+		        } else {
+		            System.out.println("Failed to update the file.");
+		        }
+
+	    }
+
+	public void updateMetaINFfileUnilever(String path) {
+		String string = "Require-Capability: scriptcollection.A2A_-_Script_Library;resolution:\n"
+				+ " =optional;bundleType:String=\"ScriptCollection\";source:String=\"reference\n"
+				+ " \"";
+
+		File original = new File(path + "\\META-INF\\MANIFEST.MF");
+		File cleaned = new File(path + "\\META-INF\\temp_MANIFEST.MF");
+		try (BufferedReader reader = new BufferedReader(new FileReader(original)); PrintWriter writer = new PrintWriter(new FileWriter(cleaned))) {
+			String line;
+			while ((line = reader.readLine()) != null) {
+				if (!line.trim().isEmpty()) {
+					writer.println(line);
+				} else {
+					writer.println(string = string + "\n");
+				}
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		// Rename cleaned file back to original
+
+		if (original.delete() && cleaned.renameTo(original)) {
+			System.out.println("Extra newlines removed successfully.");
+		} else {
+			System.out.println("Failed to update the file.");
+		}
+
+
+	}
+	
+	public void updateMetaINFfilePTTEP(String path) {
+
+        String string = "Require-Capability: scriptcollection.SC_GLB_ErrorHandling;resolution:\n"
+                + " =optional;bundleType:String=\"ScriptCollection\";source:String=\"reference\n"
+                + " \"";
+/*
+        String string = "Require-Capability: scriptcollection.MessageTransformationsUtilities;resolution:\n"
+                + " =optional;bundleType:String=\"ScriptCollection\";source:String=\"reference\n"
+                + " \"";
+ Use this one
+
+/*
+       String string =  "Require-Capability: scriptcollection.MessageTransformationsUtilities;resolution:\n"
+        +" =optional;bundleType:String=\"ScriptCollection\";source:String=\"reference\n"
+               +"\"";
+               /
+ */
+
+
+        //String string =  "Require-Capability:scriptcollection.MessageTransformationsUtilities;resolution:\n"
+         //       + " =optional;bundleType:String=\"ScriptCollection\";source:String=\"reference\n";
+
+
+
+
+        File original = new File(path+"\\META-INF\\MANIFEST.MF");
+		File cleaned = new File(path+"\\META-INF\\temp_MANIFEST.MF");
+		try (BufferedReader reader = new BufferedReader(new FileReader(original));
+				PrintWriter writer = new PrintWriter(new FileWriter(cleaned))
+				) {
+			String line;
+
+			while ((line = reader.readLine()) != null) {
+				if (!line.trim().isEmpty()) {
+					writer.println(line);
+				}else {
+					writer.println(string=string+"\n");
+				}
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		// Rename cleaned file back to original
+
+		if (original.delete() && cleaned.renameTo(original)) {
+			System.out.println("Extra newlines removed successfully.");
+		} else {
+			System.out.println("Failed to update the file.");
+		}
+}
+	
+	public Map<String, String> getExtensionElementKeyValuePersist(String name, int Id) throws IOException {// adaptermeta
+		// data
+		List<Map<String, String>> listCF = new ArrayList<Map<String, String>>();																				// list,direction,
+		Map<String, String> map = new HashMap<>(); //
+		Map<String, String> cf = new HashMap<>();
+		try {
+
+			InputStream fileInput = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(name.toString()));
+			// FileInputStream fileInput = new FileInputStream(new
+			// ClassPathResource(
+			// "BpmnElements/".concat(name)).getFile());
+			Properties properties = new Properties();// fileinput2
+
+			properties.load(fileInput);
+			fileInput.close();
+
+			Enumeration enuKeys = properties.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";// if val ==null then
+
+				if(key.equalsIgnoreCase("stepid")) {
+						value = "Persist"+String.valueOf(Id);
+
+					
+				}
+
+				else {
+					value = properties.getProperty(key);
+				}
+				map.put(key, value);
+			}
+
+			if(name.contains("JMS")) {
+				logger.info("AppGenUtility :::: getExtensionElementKeyValue :: "+ name);
+				listCF = this.bpmnDiagram.getConfigurablePropertyLists() == null ? listCF : this.bpmnDiagram.getConfigurablePropertyLists();
+				listCF.add(cf);
+				this.bpmnDiagram.setConfigurablePropertyLists(listCF);
+
+			}
+
+
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getExtensionElementKeyValue :: ", e);
+			throw e;
+		}
+		
+		return map;
+	}
+    public Map<String, String> getExtensionElementKeyValueFilter(String name) throws IOException {// adaptermeta
+        // data
+        List<Map<String, String>> listCF = new ArrayList<Map<String, String>>();																				// list,direction,
+        Map<String, String> map = new HashMap<>(); //
+        Map<String, String> cf = new HashMap<>();
+        try {
+
+            InputStream fileInput = getClass().getClassLoader()
+                    .getResourceAsStream("BpmnElements/".concat(name.toString()));
+            // FileInputStream fileInput = new FileInputStream(new
+            // ClassPathResource(
+            // "BpmnElements/".concat(name)).getFile());
+            Properties properties = new Properties();// fileinput2
+
+            properties.load(fileInput);
+            fileInput.close();
+
+            Enumeration enuKeys = properties.keys();
+            while (enuKeys.hasMoreElements()) {
+                String key = (String) enuKeys.nextElement();
+                String value = "";// if val ==null then
+                value = properties.getProperty(key);
+                map.put(key, value);
+            }
+        } catch (IOException e) {
+            logger.error("AppGenUtility :::: getExtensionElementKeyValue :: ", e);
+            throw e;
+        }
+
+        return map;
+    }
+	
+
+	public Map<String, String> getExtensionElementKeyValue(String name) throws IOException {
+		// adaptermeta
+
+		List<Map<String, String>> listCF = new ArrayList<Map<String, String>>();	// list,direction,
+		Map<String, String> map = new HashMap<>(); //
+		Map<String, String> cf = new HashMap<>();
+		try {
+
+			InputStream fileInput = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(name.toString()));
+			Properties properties = new Properties();// fileinput2
+
+			properties.load(fileInput);
+			fileInput.close();
+
+			Enumeration enuKeys = properties.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = properties.getProperty(key);// if val ==null then
+															// {{+key+}}
+				//JMS sender and receiver
+				if(value.startsWith("{{")) {
+					String val2 =properties.getProperty(key).split("\\{\\{").length>1?properties.getProperty(key).split("\\{\\{")[1]:"";
+					
+					value = "{{"+AppGenConstant.getDTExtPropertyMAp().getOrDefault(key, key)+"}}";
+					cf.put(AppGenConstant.getDTExtPropertyMAp().getOrDefault(key, key), val2);
+				}
+				map.put(key, value);
+			}
+
+			if(name.contains("JMS") || name.contains("Write") || name.contains("JDBC") || name.contains("Salesforce") || name.contains("IdocDT") 
+					|| name.contains("CollaborationXI") || name.contains("XI_DT")|| name.contains("SoapDT")|| name.contains("SoapSenDT")|| name.contains("JMSDT")) {
+				logger.info("AppGenUtility :::: getExtensionElementKeyValue :: "+ name);
+				listCF = this.bpmnDiagram.getConfigurablePropertyLists() == null ? listCF : this.bpmnDiagram.getConfigurablePropertyLists();
+				listCF.add(cf);
+				this.bpmnDiagram.setConfigurablePropertyLists(listCF);
+				
+			}
+			
+			
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getExtensionElementKeyValue :: ", e);
+			throw e;
+		}
+		return map;
+	}
+	
+	public void changePropertyvalue(String interfaceName, String interfaceNAmepsc, String string) {
+		
+		Map<String, String> result = new HashMap<>();
+				if(string.equals("xi")) {
+					result =	this.bpmnDiagram.getConfigurablePropertyLists().stream()
+		                  .filter(map -> map.containsKey("ServiceInterface"))
+		                  .findFirst().get();}
+				else {
+					result =this.bpmnDiagram.getConfigurablePropertyLists().stream()
+	                  .filter(map -> map.containsKey("Address"))
+	                  .findFirst().get();
+				}
+		if(string.equals("xi")) {
+		result.put("ServiceInterface",interfaceName);
+		result.put("InterfaceNamespace",interfaceNAmepsc);
+		}if(string.equals("soap")) {
+			result.put("Soap Address","");
+			result.remove("Address","");
+			}
+		else {
+			result.put("Address",interfaceName);
+		}
+
+	
+}
+
+	public void createPropDefinationMap(String component, String direction, String participantId) {
+
+		String adapterKey1 = component + direction;
+		Map<String, Parameter> adpaterYaml = this.readYaml.getAdapterkey();
+		Map<String, Parameter> adpaterAdd = new HashMap<String, Parameter>();
+		
+		List<Map<String, Parameter>> adapterList = new ArrayList<Map<String, Parameter>>();
+		adapterList.addAll(this.bpmnDiagram.getAdapterList());
+		String concatName = direction + participantId + "_";
+
+		for (Map.Entry<String, Parameter> adapter : adpaterYaml.entrySet()) {
+			 Parameter p = new Parameter();
+			if (adapterKey1.equalsIgnoreCase(adapter.getKey())) {
+				 Map<String, Attributes> attMap = new  HashMap<String, Attributes>();
+				for (Map.Entry<String, Attributes> att : adapter.getValue().getParameter().entrySet()) {
+					Attributes attCpy = new Attributes();
+					String key = att.getValue().getName();
+					String value =concatName + key;
+					BeanUtils.copyProperties(att.getValue(), attCpy);
+					attCpy.setName(value);
+					attMap.put(att.getKey(), attCpy);
+				}
+				p.setParameter(attMap);
+				adpaterAdd.put(adapter.getKey(),p);
+				adapterList.add(adpaterAdd);
+
+			}
+			this.bpmnDiagram.setAdapterList(adapterList);
+		}
+	}
+
+    public Map<String, String> getExtElementKeyValue(Map<String, String> adapterMetaData, String component,
+                                                     String direction, String participantId, String Value) {
+        Map<String, String> xmlMap = new HashMap<>();// for xi check msg
+
+
+        Map<String, String> configList = new HashMap<>();
+        List<Map<String, String>> listCF = new ArrayList<Map<String, String>>();
+        try {
+            if (direction.equalsIgnoreCase("Receiver"))
+                direction = "Receiver";
+            else if (direction.equalsIgnoreCase("Sender"))
+                direction = "Sender";
+
+            InputStream fileInput1 = getClass().getClassLoader()
+                    .getResourceAsStream("adapter/".concat(component + "_" + direction + "_ncp.properties"));
+            ///  adapter/HTTP_Sender_ncp.propertiessssssss
+            InputStream fileInput2 = getClass().getClassLoader()
+                    .getResourceAsStream("adapter/".concat(component + "_" + direction + "_cp.properties"));
+
+            Properties properties = new Properties();
+
+            properties.load(fileInput1);
+            fileInput1.close();
+
+            Enumeration enuKeys1 = properties.keys();
+            while (enuKeys1.hasMoreElements()) {
+                String key = (String) enuKeys1.nextElement();
+                String value = properties.getProperty(key).split("\\{\\{")[0];
+                int length = properties.getProperty(key).split("\\{\\{").length;
+                if (!value.equals("")) {
+                    for (Map.Entry<String, String> entry : adapterMetaData.entrySet()) {
+                        if (value.equals(entry.getKey())) {
+                            value = entry.getValue();
+                        }
+                    }
+                    if (value.equals("")) {
+                        value = (length == 2) ? properties.getProperty(key).split("\\{\\{")[1] : "";
+                    }
+                } else {
+                    value = (length == 2) ? properties.getProperty(key).split("\\{\\{")[1] : "";
+                }
+                xmlMap.put(key, value);
+            }
+
+            Properties properties1 = new Properties();
+            properties1.load(fileInput2);
+            fileInput2.close();
+
+            Enumeration enuKeys = properties1.keys();
+
+            while (enuKeys.hasMoreElements()) {
+                String key = (String) enuKeys.nextElement();
+                String valueXml = "{{" + direction + participantId + "_" + key + "}}";
+                String valueProp = direction + participantId + "_" + key;
+                String value2 = properties1.getProperty(key).split("\\{\\{")[0];
+                int length = properties1.getProperty(key).split("\\{\\{").length;
+                if (!value2.equals("")) {
+                    for (Map.Entry<String, String> entry : adapterMetaData.entrySet()) {
+                        if (value2.equals(entry.getKey())) {
+                            value2 = entry.getValue();
+                        }
+                        if (value2.equals("")) {
+                            value2 = (length == 2) ? properties1.getProperty(key).split("\\{\\{")[1] : "";
+                        }
+                    }
+                } else {
+                    value2 = (length == 2) ? properties1.getProperty(key).split("\\{\\{")[1] : "";
+                }
+
+                if (value2.startsWith("${property."))
+                    xmlMap.put(key, value2);
+                else {
+                    xmlMap.put(key, valueXml);
+                    configList.put(valueProp, value2);
+                }
+            }
+            String key = null;
+            String key1 = null;
+            String valuetomove = null;
+            if (Value.equals("map")) {
+                key = "AEM_toMap";
+                key1 = "AEM";
+                valuetomove = "2";
+
+            } else if (Value.equals("receiver")) {
+                key = "AEM_toReceiver";
+                key1 = "AEM";
+                valuetomove = "3";
+            } else if (Value.equals("SFTP")) {
+                key = "SFTP";
+//			    valuetomove ="3";
+            } else if (Value.equals("HTTP")) {
+                key = "HTTP";
+//			    valuetomove ="3";
+            }else if (Value.contains("sftpsender")) {
+                key = "SFTP";
+//			    valuetomove ="3";
+            }
+
+            if (Value.equals("map") || Value.equals("receiver")) {
+                for (Map.Entry<String, String> entry : xmlMap.entrySet()) {
+                    if ("maxMessageProcessingAttempts".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Attempts}}");
+                        // stop after first match (optional)
+                    } else if ("messageRetryMaxDelayInterval".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_MaxRetryInterval}}");
+                    } else if ("messageRetryInitialDelayInterval".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_RetryInterval}}");
+                    } else if ("messageRetryDelayIntervalMultiplier".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_ExponentialBackoff}}");
+                    } else if ("host".equals(entry.getKey())) {
+                        entry.setValue("{{" + key1 + "_Host}}");
+                    } else if ("messageVpn".equals(entry.getKey())) {
+                        entry.setValue("{{" + key1 + "_VPN}}");
+                    } else if ("username".equals(entry.getKey())) {
+                        entry.setValue("{{" + key1 + "_username}}");
+                    } else if ("password".equals(entry.getKey())) {
+                        entry.setValue("{{" + key1 + "_basicAuth}}");
+                    }
+                }
+
+
+                String keyToReplace = null;
+                String valueToMove = null;
+
+                for (Map.Entry<String, String> entry : new HashMap<>(configList).entrySet()) {
+                    if (entry.getKey().contains("maxMessageProcessingAttempts")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = valuetomove;
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Attempts", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("messageRetryMaxDelayInterval")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "1800000";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_MaxRetryInterval", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("messageRetryInitialDelayInterval")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "300000";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_RetryInterval", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("messageRetryDelayIntervalMultiplier")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "3.0";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_ExponentialBackoff", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("host")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "tcps://mr-connection-nid7zosct9w.messaging.solace.cloud:55443";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key1 + "_Host", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("messageVpn")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "jde-test-azure-eu-1";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key1 + "_VPN", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("username")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "sap-btp-is";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key1 + "_username", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("password")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "BTP_AEM_jde-test";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key1 + "_basicAuth", valueToMove);
+                        }
+
+                    }
+
+
+                }
+
+            }
+
+            if (Value.equals("SFTP")) {
+
+                key = "SFTP";
+                for (Map.Entry<String, String> entry : xmlMap.entrySet()) {
+                    if ("host".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Address}}");
+                        // stop after first match (optional)
+                    } else if ("connectTimeout".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Timeout}}");
+
+                    } else if ("maximumReconnectAttempts".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_MaxReconnect}}");
+
+                    } else if ("reconnectDelay".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_ReconnectDelay}}");
+                    } else if ("disconnect".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_AutomaticallyDisconnect}}");
+                    } else if ("allowDeprecatedAlgorithms".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_EnableDeprecatedAlgorithms}}");
+                    }
+                }
+
+                String keyToReplace = null;
+                String valueToMove = null;
+
+                for (Map.Entry<String, String> entry : new HashMap<>(configList).entrySet()) {
+                    if (entry.getKey().contains("host")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "TBD";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Address", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("connectTimeout")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "10000";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Timeout", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("maximumReconnectAttempts")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "3";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_MaxReconnect", "3");
+                        }
+                    } else if (entry.getKey().contains("reconnectDelay")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "1000";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_ReconnectDelay", valueToMove);
+                        }
+                    } else if (entry.getKey().contains("disconnect")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_AutomaticallyDisconnect", valueToMove);
+                        }
+                    } else if (entry.getKey().contains("allowDeprecatedAlgorithms")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_EnableDeprecatedAlgorithms", valueToMove);
+                        }
+
+                    }
+
+                }
+            }
+            if (Value.equals("HTTP")) {
+
+                key = "HTTP";
+                for (Map.Entry<String, String> entry : xmlMap.entrySet()) {
+                    if ("httpAddressWithoutQuery".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Address}}");
+                        // stop after first match (optional)
+                    } else if ("httpRequestTimeout".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Timeout}}");
+
+                    } else if ("streaming".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Streaming}}");
+
+                    } else if ("throwExceptionOnFailure".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_ThrowException}}");
+                    } else if ("enableMPLAttachments".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_AttachErrors}}");
+                    }
+                }
+
+                String keyToReplace = null;
+                String valueToMove = null;
+
+                for (Map.Entry<String, String> entry : new HashMap<>(configList).entrySet()) {
+                    if (entry.getKey().contains("httpAddressWithoutQuery")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "https://tbd.com/${property.endpoint}";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Address", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("httpRequestTimeout")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "60000";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Timeout", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("streaming")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Streaming", valueToMove);
+                        }
+                    } else if (entry.getKey().contains("throwExceptionOnFailure")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "true";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_ThrowException", valueToMove);
+                        }
+                    } else if (entry.getKey().contains("enableMPLAttachments")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "true";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_AttachErrors", valueToMove);
+                        }
+                    }
+
+                }
+            }
+
+            if (Value.contains("sftpsender")) {
+
+                char last = Value.charAt(Value.length() - 1);
+
+                key = "SFTP";
+                for (Map.Entry<String, String> entry : xmlMap.entrySet()) {
+                    if ("path".equals(entry.getKey())) {
+                        entry.setValue("{{" + key+last+ "_SourceDirectory}}");
+                        // stop after first match (optional)
+                    } else if ("fileName".equals(entry.getKey())) {
+                        entry.setValue("{{" + key+last + "_SourceFilename}}");
+                    } else if ("host".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Address}}");
+                    } else if ("credential_name".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Credentials}}");
+                    } else if ("connectTimeout".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Timeout}}");
+                    } else if ("maximumReconnectAttempts".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_MaxReconnect}}");
+                    }else if ("reconnectDelay".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_ReconnectDelay}}");
+                    }else if ("disconnect".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_AutomaticallyDisconnect}}");
+                    }else if ("allowDeprecatedAlgorithms".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_EnableDeprecatedAlgorithms}}");
+                    }else if ("file_sorting_criteria".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_Sorting}}");
+                    }else if ("maxMessagesPerPoll".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_MaxPoll}}");
+                    }else if ("file_lock_timeout".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_LockTimeout}}");
+                    }else if ("noop".equals(entry.getKey())) {
+                        entry.setValue("{{" + key + "_PostProcessing}}");
+                    }else if ("file.move".equals(entry.getKey())) {
+                        entry.setValue("{{" + key +last +"_ArchiveFolder}}");
+                    }else if ("scheduleKey".equals(entry.getKey())) {
+                        entry.setValue("{{" + key +last +"_Scheduler}}");
+                    }
+                }
+
+                String keyToReplace = null;
+                String valueToMove = null;
+
+                for (Map.Entry<String, String> entry : new HashMap<>(configList).entrySet()) {
+                    if (entry.getKey().contains("path")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "TBC";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key+last+ "_SourceDirectory", valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("fileName")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "TBC";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key+last + "_SourceFilename", valueToMove);
+                        }
+
+                    }  else if (entry.getKey().contains("file.move")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = ".archive";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key+last+"_ArchiveFolder", ".archive");
+                        }
+
+                    }else if (entry.getKey().contains("scheduleKey")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "Schedule to Recur";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key+ "_Scheduler",valueToMove);
+                        }
+
+                    } else if (entry.getKey().contains("host")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "TBD";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Address", "TBD");
+                        }
+                    } else if (entry.getKey().contains("credential_name")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "TBC";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Credentials", valueToMove);
+                        }
+                    } else if (entry.getKey().contains("connectTimeout")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "10000";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Timeout", valueToMove);
+                        }
+                    } else if (entry.getKey().contains("maximumReconnectAttempts")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "3";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_MaxReconnect", valueToMove);
+                        }
+                    }else if (entry.getKey().contains("reconnectDelay")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "1000";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_ReconnectDelay", valueToMove);
+                        }
+
+                    }else if (entry.getKey().contains("disconnect")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_AutomaticallyDisconnect", valueToMove);
+                        }
+
+                    }else if (entry.getKey().contains("allowDeprecatedAlgorithms")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_EnableDeprecatedAlgorithms", valueToMove);
+                        }
+
+                    }else if (entry.getKey().contains("file_sorting_criteria")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "sort_by_none";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_Sorting", valueToMove);
+                        }
+
+                    }else if (entry.getKey().contains("maxMessagesPerPoll")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "20";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_MaxPoll", valueToMove);
+                        }
+
+                    }else if (entry.getKey().contains("file_lock_timeout")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "15";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_LockTimeout", valueToMove);
+                        }
+
+                    }else if (entry.getKey().contains("noop")) {
+                        keyToReplace = entry.getKey();
+                        valueToMove = "move";
+                        if (keyToReplace != null) {
+                            configList.remove(keyToReplace);
+                            configList.put(key + "_PostProcessing", valueToMove);
+                        }
+
+                    }
+
+                }
+            }
+
+            listCF = this.bpmnDiagram.getConfigurablePropertyLists() == null ? listCF : this.bpmnDiagram.getConfigurablePropertyLists();
+            listCF.add(configList);
+            this.bpmnDiagram.setConfigurablePropertyLists(listCF);
+            createPropDefinationMap(component, direction, participantId);
+        } catch (IOException e) {
+            logger.error("AppGenUtility :::: getExtElementKeyValue :: ", e);
+            e.printStackTrace();
+        }
+        return xmlMap;
+    }
+
+	public Map<String, String> getExtElementKeyValue(Map<String, String> adapterMetaData, String component,
+			String direction, String participantId) {
+		Map<String, String> xmlMap = new HashMap<>();// for xi check msg
+
+
+		Map<String, String> configList = new HashMap<>();
+		List<Map<String, String>> listCF = new ArrayList<Map<String, String>>();
+		try {
+			if (direction.equalsIgnoreCase("Receiver"))
+				direction = "Receiver";
+			else if (direction.equalsIgnoreCase("Sender"))
+				direction = "Sender";
+
+			InputStream fileInput1 = getClass().getClassLoader()
+					.getResourceAsStream("adapter/".concat(component + "_" + direction + "_ncp.properties"));
+                 ///  adapter/HTTP_Sender_ncp.propertiessssssss
+			InputStream fileInput2 = getClass().getClassLoader()
+					.getResourceAsStream("adapter/".concat(component + "_" + direction + "_cp.properties"));
+
+			Properties properties = new Properties();
+
+			properties.load(fileInput1);
+			fileInput1.close();
+
+			Enumeration enuKeys1 = properties.keys();
+			while (enuKeys1.hasMoreElements()) {
+				String key = (String) enuKeys1.nextElement();
+				String value = properties.getProperty(key).split("\\{\\{")[0];
+				int length = properties.getProperty(key).split("\\{\\{").length;
+				if (!value.equals("")) {
+					for (Map.Entry<String, String> entry : adapterMetaData.entrySet()) {
+						if (value.equals(entry.getKey())) {
+							value = entry.getValue();
+						}
+					}
+					if (value.equals("")) {
+						value = (length == 2) ? properties.getProperty(key).split("\\{\\{")[1] : "";
+					}
+				} else {
+					value = (length == 2) ? properties.getProperty(key).split("\\{\\{")[1] : "";
+				}
+				xmlMap.put(key, value);
+			}
+
+			Properties properties1 = new Properties();
+			properties1.load(fileInput2);
+			fileInput2.close();
+
+			Enumeration enuKeys = properties1.keys();
+
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String valueXml = "{{" + direction + participantId + "_" + key + "}}";
+				String valueProp = direction + participantId + "_" + key;
+				String value2 = properties1.getProperty(key).split("\\{\\{")[0];
+				int length = properties1.getProperty(key).split("\\{\\{").length;
+				if (!value2.equals("")) {
+					for (Map.Entry<String, String> entry : adapterMetaData.entrySet()) {
+						if (value2.equals(entry.getKey())) {
+							value2 = entry.getValue();
+						}
+						if (value2.equals("")) {
+							value2 = (length == 2) ? properties1.getProperty(key).split("\\{\\{")[1] : "";
+						}
+					}
+				} else {
+					value2 = (length == 2) ? properties1.getProperty(key).split("\\{\\{")[1] : "";
+				}
+
+				if(value2.startsWith("${property."))
+					xmlMap.put(key, value2);
+				else {
+					if(valueProp.equals("SenderParticipant_2_address")) {
+						valueProp="ProcessDirect Name";
+						valueXml="{{ProcessDirect Name}}";
+					}
+						
+				xmlMap.put(key, valueXml);
+				configList.put(valueProp, value2);
+				}
+			}
+			listCF = this.bpmnDiagram.getConfigurablePropertyLists() == null ? listCF: this.bpmnDiagram.getConfigurablePropertyLists();
+			listCF.add(configList);
+			this.bpmnDiagram.setConfigurablePropertyLists(listCF);
+			createPropDefinationMap(component, direction, participantId);
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getExtElementKeyValue :: ", e);
+			e.printStackTrace();
+		}
+		return xmlMap;
+	}
+	public Map<String, String> getExtElementKeyValueBoomi(Map<String, String> adapterMetaData, String component,
+			String direction, String participantId) {
+		Map<String, String> xmlMap = new HashMap<>();// for xi check msg
+														// protocol first
+		Map<String, String> configList = new HashMap<>();
+		List<Map<String, String>> listCF = new ArrayList<Map<String, String>>();
+		try {
+			if (direction.equalsIgnoreCase("Receiver"))
+				direction = "Receiver";
+			else if (direction.equalsIgnoreCase("Sender"))
+				direction = "Sender";
+
+			InputStream fileInput1 = getClass().getClassLoader()
+					.getResourceAsStream("BoomiAdapter/".concat(component + "_" + direction + "_ncp.properties"));
+
+			InputStream fileInput2 = getClass().getClassLoader()
+					.getResourceAsStream("BoomiAdapter/".concat(component + "_" + direction + "_cp.properties"));
+
+			Properties properties = new Properties();
+
+			properties.load(fileInput1);
+			fileInput1.close();
+
+			Enumeration enuKeys1 = properties.keys();
+			while (enuKeys1.hasMoreElements()) {
+				String key = (String) enuKeys1.nextElement();
+				String value = properties.getProperty(key).split("\\{\\{")[0];
+				int length = properties.getProperty(key).split("\\{\\{").length;
+				if (!value.equals("")) {
+					for (Map.Entry<String, String> entry : adapterMetaData.entrySet()) {
+						if (value.equals(entry.getKey())) {
+							value = entry.getValue();
+						}
+					}
+					if (value.equals("")) {
+						value = (length == 2) ? properties.getProperty(key).split("\\{\\{")[1] : "";
+					}
+				} else {
+					value = (length == 2) ? properties.getProperty(key).split("\\{\\{")[1] : "";
+				}
+				xmlMap.put(key, value);
+			}
+
+			Properties properties1 = new Properties();
+			properties1.load(fileInput2);
+			fileInput2.close();
+
+			Enumeration enuKeys = properties1.keys();
+
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String valueXml = "{{" + direction + participantId + "_" + key + "}}";
+				String valueProp = direction + participantId + "_" + key;
+				String value2 = properties1.getProperty(key).split("\\{\\{")[0];
+				int length = properties1.getProperty(key).split("\\{\\{").length;
+				if (!value2.equals("")) {
+					for (Map.Entry<String, String> entry : adapterMetaData.entrySet()) {
+						if (value2.equals(entry.getKey())) {
+							value2 = entry.getValue();
+						}
+						if (value2.equals("")) {
+							value2 = (length == 2) ? properties1.getProperty(key).split("\\{\\{")[1] : "";
+						}
+					}
+				} else {
+					value2 = (length == 2) ? properties1.getProperty(key).split("\\{\\{")[1] : "";
+				}
+
+				xmlMap.put(key, valueXml);
+				configList.put(valueProp, value2);
+			}
+			listCF = this.bpmnDiagram.getConfigurablePropertyLists() == null ? listCF: this.bpmnDiagram.getConfigurablePropertyLists();
+			listCF.add(configList);
+			this.bpmnDiagram.setConfigurablePropertyLists(listCF);
+			createPropDefinationMap(component, direction, participantId);
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getExtElementKeyValue :: ", e);
+			e.printStackTrace();
+		}
+		return xmlMap;
+	}
+	public Map<String, String> getExtElementKeyValueMule(Map<String, String> adapterMetaData, String component,
+			String direction, String participantId) {
+		Map<String, String> xmlMap = new HashMap<>();// for xi check msg
+														// protocol first
+		Map<String, String> configList = new HashMap<>();
+		List<Map<String, String>> listCF = new ArrayList<Map<String, String>>();
+		try {
+			if (direction.equalsIgnoreCase("Receiver"))
+				direction = "Receiver";
+			else if (direction.equalsIgnoreCase("Sender"))
+				direction = "Sender";
+            if(component.contentEquals("SFTP")) {
+            	component = "File";
+            }
+			InputStream fileInput1 = getClass().getClassLoader()
+					.getResourceAsStream("mule_adapter/".concat(component + "_" + direction + "_ncp.properties"));
+
+			InputStream fileInput2 = getClass().getClassLoader()
+					.getResourceAsStream("mule_adapter/".concat(component + "_" + direction + "_cp.properties"));
+
+			Properties properties = new Properties();
+
+			properties.load(fileInput1);
+			fileInput1.close();
+
+			Enumeration enuKeys1 = properties.keys();
+			while (enuKeys1.hasMoreElements()) {
+				String key = (String) enuKeys1.nextElement();
+				String value = properties.getProperty(key).split("\\{\\{")[0];
+				int length = properties.getProperty(key).split("\\{\\{").length;
+				if (!value.equals("")) {
+					for (Map.Entry<String, String> entry : adapterMetaData.entrySet()) {
+						if (value.equals(entry.getKey())) {
+							value = entry.getValue();
+						}
+					}
+					if (value.equals("")) {
+						value = (length == 2) ? properties.getProperty(key).split("\\{\\{")[1] : "";
+					}
+				} else {
+					value = (length == 2) ? properties.getProperty(key).split("\\{\\{")[1] : "";
+				}
+				xmlMap.put(key, value);
+			}
+
+			Properties properties1 = new Properties();
+			properties1.load(fileInput2);
+			fileInput2.close();
+
+			Enumeration enuKeys = properties1.keys();
+
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String valueXml = "{{" + direction + participantId + "_" + key + "}}";
+				String valueProp = direction + participantId + "_" + key;
+				String value2 = properties1.getProperty(key).split("\\{\\{")[0];
+				int length = properties1.getProperty(key).split("\\{\\{").length;
+				if (!value2.equals("")) {
+					for (Map.Entry<String, String> entry : adapterMetaData.entrySet()) {
+						if (value2.equals(entry.getKey())) {
+							value2 = entry.getValue();
+						}
+						if (value2.equals("")) {
+							value2 = (length == 2) ? properties1.getProperty(key).split("\\{\\{")[1] : "";
+						}
+					}
+				} else {
+					value2 = (length == 2) ? properties1.getProperty(key).split("\\{\\{")[1] : "";
+				}
+
+				xmlMap.put(key, valueXml);
+				configList.put(valueProp, value2);
+			}
+			listCF = this.bpmnDiagram.getConfigurablePropertyLists() == null ? listCF: this.bpmnDiagram.getConfigurablePropertyLists();
+			listCF.add(configList);
+			this.bpmnDiagram.setConfigurablePropertyLists(listCF);
+			createPropDefinationMap(component, direction, participantId);
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getExtElementKeyValue :: ", e);
+			e.printStackTrace();
+		}
+		return xmlMap;
+	}
+
+	public void addCFProperties(List<MappingParameter> list, String id) {
+		Map<String, String> paraCFMap = new HashMap<>();
+		for (MappingParameter mp : list) {
+			if (id != null) {
+				paraCFMap.put(id + "_" + mp.getName(), mp.getValue());
+				mp.setValue("{{" + id + "_" + mp.getName() + "}}");
+			} else {
+				paraCFMap.put(mp.getName(), mp.getValue());
+				mp.setValue("{{" + mp.getName() + "}}");
+			}
+		}
+		this.bpmnDiagram.getConfigurablePropertyLists().add(paraCFMap);
+	}
+
+    public void addCFProperties(List<MappingParameter> list) {
+        Map<String, String> paraCFMap = new HashMap<>();
+        for (MappingParameter mp : list) {
+            {
+                paraCFMap.put(mp.getName(), mp.getValue());
+                mp.setValue("{{" + mp.getName() + "}}");
+            }
+        }
+        this.bpmnDiagram.getConfigurablePropertyLists().add(paraCFMap);
+    }
+
+	public Map<String, String> getPropertyRouter(List<String> seqList) {
+		Map<String, String> routerPropMap = new HashMap<>();
+		try {
+			String tableSeq = "";
+			int r = 1;
+			for (String seq : seqList) {
+				tableSeq += "<row><cell>" + r++ + "</cell><cell>" + seq + "</cell></row>";
+			}
+
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.ROUTER));
+			// FileInputStream in = new FileInputStream(
+			// new
+			// ClassPathResource("BpmnElements/".concat("Router.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+			// store the file in map
+			// update the map with seq list
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("routingSequenceTable")) {
+					value = tableSeq;
+				} else {
+					value = props.getProperty(key);// if val ==null then
+													// {{+key+}}
+				}
+				routerPropMap.put(key, value);
+			}
+
+			return routerPropMap;
+		} catch (IOException e) {
+			logger.error("AppGenUtility :::: getPropertyRouter :: ", e);
+			e.printStackTrace();
+		}
+		return routerPropMap;
+	}
+	
+	public Map<String, String> getPropDefJSONtoXML(Map<String, String> map) {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.JSONtoXML));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("additionalRootElementName")) {
+					value = map.get("in.format.wrapperName");
+//				} else if (key.equalsIgnoreCase("additionalRootElementNamespace")) {
+//					value = map.get("in.format.wrapperNamespace");
+			} 
+				else if (key.equalsIgnoreCase("addXMLRootElement")) {
+					value = "true";
+				} else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	
+	public Map<String, String> getPropDefXMLtoJSON(Map<String, String> map) {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.XMLtoJSON));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("xmlJsonSuppressRootElement")) {
+					value ="true";
+				} else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	public Map<String, String> getPropDefXMLtoCSV(Map<String, String> map) {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.XMLtoCSV));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("xmlJsonSuppressRootElement")) {
+					value ="true";
+				} else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	public Map<String, String> getZipCompress() {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat("Base64Encoder.properties"));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("cmdVariantUri")) {
+					value ="ctype::FlowstepVariant/cname::ZIP Compress/version::1.0.1";
+				} else if (key.equalsIgnoreCase("encoderType")) {
+					value = "ZIP Compress";
+				} else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	public Map<String, String> getZipDecompress() {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat("Base64Decoder.properties"));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("cmdVariantUri")) {
+					value ="ctype::FlowstepVariant/cname::ZIP Decompress/version::1.0.2";
+				} else if (key.equalsIgnoreCase("encoderType")) {
+					value = "ZIP Decompress";
+				} else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+
+	public Map<String, String> getPropDefCallActivity(String fileName,boolean msgBundle) {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CALL_ACTIVITY));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("mappinguri")) {
+					value = "dir://mmap/src/main/resources/mapping/" + fileName + AppGenConstant.MM_File_mmapExt;
+				} else if (key.equalsIgnoreCase("mappingname")) {
+					value = fileName;
+				} else if (key.equalsIgnoreCase("mappingpath")) {
+					value = "src/main/resources/mapping/" + fileName;
+				}else if (key.equalsIgnoreCase("messageMappingBundleId") && msgBundle) {
+					value = fileName;
+				} else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	public Map<String, String> getContentModifier(List<MappingParameter> list,boolean header,String body) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CONTENTMODIFIER));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("bodyType")) {
+					value = "constant";
+				} else if (header && key.equalsIgnoreCase("headerTable") && list!=null) {
+					for(MappingParameter val :list) {
+						value +="<row><cell id='Action'>Create</cell><cell id='Type'>"+val.getType()+"</cell><cell id='Value'>"+val.getValue()+"</cell><cell id='Default'></cell><cell id='Name'>"+val.getName()+"</cell><cell id='Datatype'>"+(val.getType().matches("xpath|expression")?"java.lang.string":"")+"</cell></row>";
+					}
+				} else if(!header && key.equalsIgnoreCase("propertyTable") &&  list!=null) {
+					for(MappingParameter val :list) {
+						value +="<row><cell id='Action'>Create</cell><cell id='Type'>constant</cell><cell id='Value'>"+val.getValue()+"</cell><cell id='Default'></cell><cell id='Name'>"+val.getName()+"</cell><cell id='Datatype'>"+val.getType()+"</cell></row>";
+					}
+				} else if(key.equalsIgnoreCase("wrapContent") && StringUtils.isNotBlank(body)) {
+					value = body;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+	
+	public Map<String, String> getContentModifier(List<MappingParameter> hlist,List<MappingParameter> plist,String body) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CONTENTMODIFIER));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("bodyType")) {
+					value = "constant";
+				} else if (key.equalsIgnoreCase("headerTable")) {
+					for(MappingParameter val :hlist) {
+						value +="<row><cell id='Action'>"+ (val.getAction()==null?"Create":val.getAction()) +"</cell><cell id='Type'>"+val.getType()+"</cell><cell id='Value'>"+val.getValue()+"</cell><cell id='Default'></cell><cell id='Name'>"+val.getName()+"</cell><cell id='Datatype'>"+(val.getType().equals("xpath")||val.getType().equals("expression")?"java.lang.String":"")+"</cell></row>";
+					}
+				} else if(key.equalsIgnoreCase("propertyTable")) {
+					for(MappingParameter val :plist) {
+						value +="<row><cell id='Action'>"+ (val.getAction()==null?"Create":val.getAction()) +"</cell><cell id='Type'>"+val.getType()+"</cell><cell id='Value'>"+val.getValue()+"</cell><cell id='Default'></cell><cell id='Name'>"+val.getName()+"</cell><cell id='Datatype'>"+(val.getType().equals("xpath")||val.getType().equals("expression")?"java.lang.String":"")+"</cell></row>";
+					}
+				} else if(key.equalsIgnoreCase("wrapContent") && StringUtils.isNotBlank(body)) {
+					value = body;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+} catch (IOException e) {
+	e.printStackTrace();
+}
+return contentMod;
+}
+	
+	public Map<String, String> getContentModifier(List<MappingParameter> hlist,List<MappingParameter> plist,String body, String bodyType ) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CONTENTMODIFIER));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("bodyType")) {
+					value = bodyType;
+				} else if (key.equalsIgnoreCase("headerTable")) {
+					for(MappingParameter val :hlist) {
+						value +="<row><cell id='Action'>Create</cell><cell id='Type'>"+val.getType()+"</cell><cell id='Value'>"+val.getValue()+"</cell><cell id='Default'></cell><cell id='Name'>"+val.getName()+"</cell><cell id='Datatype'>"+(val.getType().equals("xpath")||val.getType().equals("expression")?"java.lang.String":"")+"</cell></row>";
+					}
+				} else if(key.equalsIgnoreCase("propertyTable")) {
+					for(MappingParameter val :plist) {
+						value +="<row><cell id='Action'>Create</cell><cell id='Type'>"+val.getType()+"</cell><cell id='Value'>"+val.getValue()+"</cell><cell id='Default'></cell><cell id='Name'>"+val.getName()+"</cell><cell id='Datatype'>"+(val.getType().equals("xpath")||val.getType().equals("expression")?"java.lang.String":"")+"</cell></row>";
+					}
+				} else if(key.equalsIgnoreCase("wrapContent") && StringUtils.isNotBlank(body)) {
+					value = body;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+} catch (IOException e) {
+	e.printStackTrace();
+}
+return contentMod;
+}
+
+	public Map<String, String> getContentModifier(String val) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CONTENTMODIFIER_ERR));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if(key.equalsIgnoreCase("wrapContent")) {
+						value=val;
+				}else if (key.equalsIgnoreCase("headerTable")) {
+					value="";
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+	public Map<String, String> getContentModifierDelete(List<MappingParameter> list,boolean header) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CONTENTMODIFIER));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("bodyType")) {
+					value = "constant";
+				} else if (header && key.equalsIgnoreCase("headerTable")) {
+					for(MappingParameter val :list) {
+						value +="<row><cell id='Action'>Create</cell><cell id='Type'>"+val.getType()+"</cell><cell id='Value'>"+val.getValue()+"</cell><cell id='Default'></cell><cell id='Name'>"+val.getName()+"</cell><cell id='Datatype'>"+(val.getType().equals("xpath")?"java.lang.string":"")+"</cell></row>";
+					}
+				} else if(!header && key.equalsIgnoreCase("propertyTable")) {
+					for(MappingParameter val :list) {
+						value +="<row><cell id='Action'>Delete</cell><cell id='Type'>constant</cell><cell id='Value'></cell><cell id='Default'></cell><cell id='Name'>$name="+val.getName()+"</cell><cell id='Datatype'></cell></row>";
+					}
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+	public Map<String, String> getGenSplitter(String val,String batchsize) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat("GeneralSplitter.properties"));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if(key.equalsIgnoreCase("splitExprValue")) {
+						value=val;
+				}else if(key.equalsIgnoreCase("grouping") && batchsize!=null) {
+					value=batchsize;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+	public Map<String, String> getGroovy(String val,String scriptBundle, String funName) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat("Groovy.properties"));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if(key.equalsIgnoreCase("script")) {
+					value=val+".groovy";
+				}else if(key.equalsIgnoreCase("scriptBundleId") && scriptBundle!=null) {
+					value=scriptBundle;
+				}else if(key.equalsIgnoreCase("scriptFunction") && funName!=null){
+					value = funName;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+	public Map<String, String> getXMlvalidatorKeyValue(String val) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat("XmlValidator.properties"));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if(key.equalsIgnoreCase("xsd")) {
+						value=val;
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+	public Map<String, String> getGenSplitter(String val) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat("GeneralSplitter.properties"));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if(key.equalsIgnoreCase("splitExprValue")) {
+						value=val;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+	public Map<String, String> getGroovy(String val, String scriptBundle) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat("Groovy.properties"));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if(key.equalsIgnoreCase("script")) {
+						value=val+".groovy";
+				}else if(key.equalsIgnoreCase("scriptBundleId") && scriptBundle!=null) {
+					value=scriptBundle;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+	
+	public Map<String, String> getExtensionElementSeqCond(String type) {
+
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.SEQUENCE_FLOW));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if(key.equalsIgnoreCase("expressionType")) {
+						value=type;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	
+	}
+
+	public static String convertToZip(String jarBase64, String path, String fileName) {
+		String outputFilePath = path + File.separator + fileName + ".zip";
+
+		File file = new File(outputFilePath);
+
+		try (FileOutputStream fos = new FileOutputStream(file);) {
+			byte[] decoder = Base64.decodeBase64(jarBase64);
+
+			fos.write(decoder);
+		} catch (Exception e) {
+			logger.error("outputFilePath "+ outputFilePath);
+			e.printStackTrace();
+		}
+		return outputFilePath;
+	}
+
+	public static void UnZipFile(String fileZip, String folder_path) throws IOException {
+		logger.info("file to unzip "+ fileZip);
+		logger.info("Destination Folder "+ folder_path);
+		ZipInputStream zis=null;
+		try {
+		File destDir = new File(folder_path);
+		byte[] buffer = new byte[1024];
+		zis = new ZipInputStream(new FileInputStream(fileZip));
+		ZipEntry zipEntry = zis.getNextEntry();
+		while (zipEntry != null) {
+			File newFile = newFile(destDir, zipEntry);
+			if (zipEntry.isDirectory()) {
+				if (!newFile.isDirectory() && !newFile.mkdirs()) {
+					throw new IOException("Failed to create directory " + newFile);
+				}
+			} else {
+				// fix for Windows-created archives
+				File parent = newFile.getParentFile();
+				if (!parent.isDirectory() && !parent.mkdirs()) {
+					throw new IOException("Failed to create directory " + parent);
+				}
+
+				// write file content
+				FileOutputStream fos = new FileOutputStream(newFile);
+				int len;
+				while ((len = zis.read(buffer)) > 0) {
+					fos.write(buffer, 0, len);
+				}
+				fos.close();
+			}
+			zipEntry = zis.getNextEntry();
+		}
+		}catch(Exception e) {
+			logger.error("AppGenUtility UnZipFile() :: ",e);
+			throw e;
+		} finally {
+			if (zis != null) {
+				zis.closeEntry();
+				zis.close();
+			}
+		}
+	}
+
+
+
+public static void UnZipFile(InputStream fileZip, String folder_path) throws IOException {
+		File destDir = new File(folder_path);
+		byte[] buffer = new byte[1024];
+		ZipInputStream zis = new ZipInputStream(fileZip);
+		ZipEntry zipEntry = zis.getNextEntry();
+		while (zipEntry != null) {
+			File newFile = newFile(destDir, zipEntry);
+			if (zipEntry.isDirectory()) {
+				if (!newFile.isDirectory() && !newFile.mkdirs()) {
+					throw new IOException("Failed to create directory " + newFile);
+				}
+			} else {
+				// fix for Windows-created archives
+				File parent = newFile.getParentFile();
+				if (!parent.isDirectory() && !parent.mkdirs()) {
+					throw new IOException("Failed to create directory " + parent);
+				}
+
+				// write file content
+				FileOutputStream fos = new FileOutputStream(newFile);
+				int len;
+				while ((len = zis.read(buffer)) > 0) {
+					fos.write(buffer, 0, len);
+				}
+				fos.close();
+			}
+			zipEntry = zis.getNextEntry();
+		}
+		zis.closeEntry();
+		zis.close();
+	}
+
+	private static File newFile(File destinationDir, ZipEntry zipEntry) throws IOException {
+		File destFile = new File(destinationDir, zipEntry.getName());
+
+		String destDirPath = destinationDir.getCanonicalPath();
+		String destFilePath = destFile.getCanonicalPath();
+
+		if (!destFilePath.startsWith(destDirPath + File.separator)) {
+			throw new IOException("Entry is outside of the target dir: " + zipEntry.getName());
+		}
+
+		return destFile;
+	}
+
+	public Map<String, String> getPropDefCallActivityXslt(String xsltName, String type) {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CALL_ACTIVITY_XSLT));
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("mappinguri")) {
+					value = "dir://mapping/xslt/src/main/resources/mapping/" + xsltName + "." + type;
+				} else if (key.equalsIgnoreCase("mappingname")) {
+					value = xsltName;
+				} else if (key.equalsIgnoreCase("mappingpath")) {
+					value = "src/main/resources/mapping/" + xsltName;
+				} else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	
+	
+	public Map<String, String> getPropDefCallActivityXslt() {
+	Map<String, String> callProp = new HashMap<>();
+	try {
+		InputStream in = getClass().getClassLoader()
+				.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CALL_ACTIVITY_XSLT));
+		Properties props = new Properties();
+		props.load(in);
+		in.close();
+
+		Enumeration enuKeys = props.keys();
+		while (enuKeys.hasMoreElements()) {
+			String key = (String) enuKeys.nextElement();
+			String value = "";
+			if (key.equalsIgnoreCase("mappingHeaderNameKey")) {
+				value = "Common_XSLT_Mappings";
+			} else if (key.equalsIgnoreCase("mappingSource")) {
+				value = "mappingSrcHeader";
+			} else {
+				value = props.getProperty(key);
+			}
+			callProp.put(key, value);
+		}
+
+		return callProp;
+
+	} catch (IOException e) {
+		e.printStackTrace();
+	}
+	return callProp;
+}
+	public static final Map<String, String> getDevSystemsMapDT() {
+		Map<String, String> map = new HashMap<>();
+		map.put("PM4CLNT200", "EDM");
+		map.put("BS_S7HCLNT100", "EDM");
+		map.put("PU1CLNT100", "EDM_R3M");
+		map.put("PC3CLNT200", "EDM_R3M");
+		map.put("PPLCLNT200", "PSL_DE");
+		map.put("BDTAGPTB400", "HR_BTG");
+		map.put("PFN_100", "TSG_WWS");
+//		map.put("BS_S7HCLNT100", "DEV_S7HCLNT100");
+//		map.put("ART", "DEV_ART");
+		return map;
+	}
+
+
+	// for pgp properties //not being used
+	public Map<String, String> PGPProperty(String pgpFilename, Map<String, String> pgpProperties) {
+		Map<String, String> pgpPropXml = new HashMap<>();
+		try {
+			InputStream fileInput_ncp = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(pgpFilename + "_ncp.properties"));
+
+			InputStream fileInput_cp = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(pgpFilename + "_cp.properties"));
+
+			Properties props = new Properties();
+			props.load(fileInput_ncp);
+			fileInput_ncp.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				pgpPropXml.put(key, props.getProperty(key));
+			}
+
+			props = new Properties();
+			props.load(fileInput_cp);
+			fileInput_cp.close();
+
+			Enumeration enumKey = props.keys();
+			if (pgpFilename.equalsIgnoreCase(AppGenConstant.PGP_DEC)) {
+				while (enumKey.hasMoreElements()) {
+					String key = (String) enumKey.nextElement();
+					String valueProp = AppGenConstant.PGP_DEC + "_" + key;
+					String valueXml = "{{" + valueProp + "}}";
+					String value = pgpProperties.get("applySignature");
+					pgpPropXml.put(key, valueXml);
+				}
+
+			} else {
+				while (enumKey.hasMoreElements()) {
+					String key = (String) enumKey.nextElement();
+					// getID
+					String valueProp = AppGenConstant.PGP_ENC + "_" + key;
+					String valueXml = "{{" + valueProp + "}}";
+					String value = pgpProperties.get("applySignature");
+				}
+
+			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+
+		return pgpPropXml;
+	}
+
+	// convert bodypart to bytes
+	private static byte[] getOutputByte(BodyPart bodyPart) {
+		byte[] targetArray = null;
+		try {
+			targetArray = new byte[bodyPart.getInputStream().available()];
+			bodyPart.getInputStream().read(targetArray);
+			if (bodyPart.getInputStream() != null) {
+				bodyPart.getInputStream().close();
+			}
+
+		} catch (Exception e) {
+			logger.error("AppGenUtility :::: getOutputByte :: ", e);
+			e.printStackTrace();
+		}
+		return targetArray;
+	}
+
+	// to extract json from get batch call
+	public static void parseMutipart(String parseString, List<JSONObject> resJson) {
+		try {
+			ByteArrayDataSource datasource = new ByteArrayDataSource(parseString, "multipart/mixed");
+			MimeMultipart multipart = new MimeMultipart(datasource);
+			int count = multipart.getCount();
+			// System.out.println("count " + count);
+			for (int i = 0; i < count; i++) {
+				BodyPart bodyPart = multipart.getBodyPart(i);
+				if (bodyPart.isMimeType("application/json")) {
+					byte[] arrOfByte;
+					arrOfByte = getOutputByte(bodyPart);
+
+					String Json = new String(arrOfByte);
+					JSONObject obj = new JSONObject(Json);
+					resJson.add(obj);
+				} else {
+					// if any other data then here
+					// System.out.println("default " +
+					// bodyPart.getContentType());
+					// System.out.println(bodyPart.getContent().toString());
+					byte[] arrOfByte = getOutputByte(bodyPart);
+
+					String jsonMultipart = new String(arrOfByte);
+					jsonMultipart = "--batch_1\r\n" + jsonMultipart;
+
+					parseMutipart(jsonMultipart, resJson);
+				}
+
+			}
+		} catch (Exception e) {
+			logger.error("AppGenUtility :::: parseMutipart :: ", e);
+			e.printStackTrace();
+		}
+	}
+
+	public static Map<String, String> getMessageFlowProperties(String pckFolder, String iflowFolder) throws IOException {
+		Map<String, String> propsMap = new LinkedHashMap<>();
+
+		Properties properties = new Properties();
+
+		FileInputStream inputStream = new FileInputStream(AppGenConstant.MAIN_PATH+"\\IflowsFolder\\"+pckFolder+"\\"+iflowFolder+"\\src\\main\\resources\\parameters.prop");
+		properties.load(inputStream);
+
+		propsMap.putAll(properties.entrySet().stream()
+				.collect(Collectors.toMap(e -> e.getKey().toString(), e -> e.getValue().toString())));
+		
+		return propsMap;
+	}
+	
+	@SafeVarargs
+	public static <T> Predicate<T> distinctByKeys(Function<? super T, ?>... keyExtractors) {
+		final Map<List<?>, Boolean> seen = new ConcurrentHashMap<>();
+
+		return t -> {
+			final List<?> keys = Arrays.stream(keyExtractors).map(ke -> ke.apply(t)).collect(Collectors.toList());
+
+			return seen.putIfAbsent(keys, Boolean.TRUE) == null;
+		};
+	}
+
+
+	public static String getOauthToken(Tenants tnt) throws Exception {
+		String token ="";
+		try {
+		String encodedCredentials = new String(Base64.encodeBase64((tnt.getClientId()+":"+tnt.getClientSecret()).getBytes()));
+		HttpHeaders headers = new HttpHeaders();
+		headers.setAccept(Arrays.asList(MediaType.APPLICATION_JSON));
+		headers.add("Authorization", "Basic " + encodedCredentials);
+
+		HttpEntity<String> request = new HttpEntity<String>(headers);
+		RestTemplate restTemplate = new RestTemplate();
+		ResponseEntity<String> response  = restTemplate.exchange(tnt.getTokenURL().concat("?grant_type=client_credentials"), HttpMethod.POST, request, String.class);
+		System.out.println("Access Token Response ---------" + response.getBody());
+
+		// Get the Access Token From the recieved JSON response
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode node = mapper.readTree(response.getBody());
+		 token = node.path("access_token").asText();
+		 token ="Bearer "+token;
+		}catch(Exception e) {
+			logger.error("AppGenUtility :::: getOauthToken :: ",e);
+			throw e;
+		}
+		return token;
+	}
+	
+	public static String getOauthTokenPoTenant(PoTenant tnt) throws Exception {
+		String token ="";
+		try {
+		String encodedCredentials = new String(Base64.encodeBase64((tnt.getPoUserName()+":"+tnt.getPoPassword()).getBytes()));
+		HttpHeaders headers = new HttpHeaders();
+		headers.setAccept(Arrays.asList(MediaType.APPLICATION_JSON));
+		headers.add("Authorization", "Basic " + encodedCredentials);
+
+		HttpEntity<String> request = new HttpEntity<String>(headers);
+		RestTemplate restTemplate = new RestTemplate();
+		ResponseEntity<String> response  = restTemplate.exchange(tnt.getTokenURL().concat("?grant_type=client_credentials"), HttpMethod.POST, request, String.class);
+		System.out.println("Access Token Response ---------" + response.getBody());
+
+		// Get the Access Token From the recieved JSON response
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode node = mapper.readTree(response.getBody());
+		 token = node.path("access_token").asText();
+		 token ="Bearer "+token;
+		}catch(Exception e) {
+			logger.error("AppGenUtility :::: getOauthToken :: ",e);
+			throw e;
+		}
+		return token;
+	}
+		
+	
+	 public static String generateMD5(String input) {
+	        try {
+	            // Create MessageDigest instance for MD5
+	            MessageDigest md = MessageDigest.getInstance("MD5");
+
+	            // Add input string bytes to digest
+	            md.update(input.getBytes());
+
+	            // Get the hash's bytes
+	            byte[] bytes = md.digest();
+
+	            // Convert byte array to signum representation
+	            BigInteger bigInteger = new BigInteger(1, bytes);
+
+	            // Convert message digest into hex value
+	            String md5Hash = bigInteger.toString(16);
+
+	            // Pad with leading zeros to ensure 32 characters
+	            while (md5Hash.length() < 32) {
+	                md5Hash = "0" + md5Hash;
+	            }
+
+	            return md5Hash;
+	        } catch (NoSuchAlgorithmException e) {
+	            throw new RuntimeException(e);
+	        }
+	    }
+
+	public Map<String, String> getDynamicMM() {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.CALL_ACTIVITY));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("mappingReference")) {
+					value = "dynamic";
+				}else if(key.equalsIgnoreCase("mappingSourceValue")) {
+					value = "${property.mappingname}";
+				} 
+				else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	
+	public static <T> Stream<List<T>> batches(List<T> source, int length) {
+	    if (length <= 0)
+	        throw new IllegalArgumentException("length = " + length);
+	    int size = source.size();
+	    if (size <= 0)
+	        return Stream.empty();
+	    int fullChunks = (size - 1) / length;
+	    return IntStream.range(0, fullChunks + 1).mapToObj(
+	        n -> source.subList(n * length, n == fullChunks ? size : (n + 1) * length));
+	}
+	
+	public Map<String, String> getProcessCall(String processId) {
+		Map<String, String> contentMod = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat("ProcessCall.properties"));//using it 2nd time
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+ 
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if(key.equalsIgnoreCase("processId")) {
+						value="Process_L"+processId;
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				contentMod.put(key, value);
+			}
+			return contentMod;
+ 
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return contentMod;
+	}
+
+    public Map<String, String> getIdempotentProcessCall(String processId) {
+        Map<String, String> contentMod = new HashMap<>();
+        try {
+            InputStream in = getClass().getClassLoader()
+                    .getResourceAsStream("BpmnElements/ProcessCall_Idempotent.properties");
+            Properties props = new Properties();
+            props.load(in);
+            in.close();
+
+            Enumeration enuKeys = props.keys();
+            while (enuKeys.hasMoreElements()) {
+                String key = (String) enuKeys.nextElement();
+                String value = "";
+
+                if (key.equalsIgnoreCase("processId")) {
+                    value = "Process_L" + processId;
+                }
+                else if (key.equalsIgnoreCase("sourceMessageID")) {
+                    // THIS IS THE MESSAGE ID
+                    value = "${header.MessageID}";
+
+                }
+                else {
+                    value = props.getProperty(key);
+                }
+
+                contentMod.put(key, value);
+            }
+            return contentMod;
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return contentMod;
+    }
+
+
+
+    public Map<String, String> getPGPEncp(Map<String, String> parameters) {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.PGP_ENC));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("PgpSignatureOption")) {
+					value =parameters.get("applySignature");
+				}else if(key.equalsIgnoreCase("PgpSignerUserIDs")) {
+					value = "<row><cell id='SignerUserID'>"+parameters.getOrDefault("ownPrivateKey","")+"</cell></row>";
+				} else if(key.equalsIgnoreCase("PgpEncryptionUserIDs")) {
+					value = "<row><cell id='EncryptUserID'>"+parameters.getOrDefault("partnerPublicKey","")+"</cell></row>";
+				} else if (key.equalsIgnoreCase("Key_Length")) {
+					value =parameters.get("keyLength");
+				}else if (key.equalsIgnoreCase("PgpContentEncryptionAlgorithm")) {
+					value =parameters.get("encryptionAlgo");
+				}else if (key.equalsIgnoreCase("PgpDigestAlgorithm")) {
+					value =parameters.get("signingAlgo");
+				}else if (key.equalsIgnoreCase("PgpCompressionAlgorithm")) {
+					value =parameters.get("applyCompression");
+				}else if (key.equalsIgnoreCase("PgpArmored")) {
+					value =parameters.get("asciiArmored");
+				}
+				else {
+					value = props.getProperty(key);
+				}
+				
+				if(value == null)
+					value="";
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	
+	public Map<String, String> getPGPDecrypt(Map<String, String> parameters) {
+		Map<String, String> callProp = new HashMap<>();
+		try {
+			InputStream in = getClass().getClassLoader()
+					.getResourceAsStream("BpmnElements/".concat(AppGenConstant.PGP_DEC));
+			// FileInputStream in = new FileInputStream(new ClassPathResource(
+			// "BpmnElements/".concat("CallActivity.properties")).getFile());
+			Properties props = new Properties();
+			props.load(in);
+			in.close();
+
+			Enumeration enuKeys = props.keys();
+			while (enuKeys.hasMoreElements()) {
+				String key = (String) enuKeys.nextElement();
+				String value = "";
+				if (key.equalsIgnoreCase("PgpDecryptionSignatureOption")) {
+					value =parameters.getOrDefault("applySignature","");
+				}else if(key.equalsIgnoreCase("PgpDecryptionSignerUserIDs")) {
+					value = "<row><cell id='userId'>"+parameters.getOrDefault("ownPrivateKey","")+"</cell></row>";
+				} 
+				else {
+					value = props.getProperty(key);
+				}
+				callProp.put(key, value);
+			}
+			return callProp;
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return callProp;
+	}
+	
+	public static final Map<String, String> getDevSystemsMapTakeda() {
+		Map<String, String> map = new HashMap<>();
+		map.put("PRDCLNT100", "CUSCLNT100");
+		map.put("PU1CLNT100", "XU1CLNT100");
+		map.put("PW1CLNT100", "XW1CLNT100");
+		map.put("OEP_100", "OED_100");
+//		map.put("BS_S7HCLNT100", "DEV_S7HCLNT100");
+//		map.put("ART", "DEV_ART");
+		return map;
+	}
+
+    public static final Map<String, String> getDevSystemsMapKering() {
+        Map<String, String> map = new HashMap<>();
+        map.put("PRDCLNT100", "CUSCLNT100");
+        map.put("PU1CLNT100", "XU1CLNT100");
+        map.put("PW1CLNT100", "XW1CLNT100");
+        map.put("OEP_100", "OED_100");
+//		map.put("BS_S7HCLNT100", "DEV_S7HCLNT100");
+//		map.put("ART", "DEV_ART");
+        return map;
+    }
+
+	public static final Map<String, String> getDevSystemsMapPttep()
+    {
+		Map<String, String> map = new HashMap<>();
+
+        //Bussiness System
+		map.put("BC_APIM", "BC_APM");
+		map.put("BC_DLOGISTIC", "BC_DLOG");
+		map.put("BC_GEP_APIM", "BC_GEP");
+		map.put("BC_HRWebService", "BC_HRWS");
+		map.put("AFE_D", "BC_AFE");
+		map.put("AMS_D", "BC_AMS");
+		map.put("BOA_D", "BC_BOA");
+		map.put("DELEG_D", "BC_Delegation");
+		map.put("HSBC_D", "BC_HSBC");
+		map.put("ILOGISTICS_D", "BC_DLOG");
+		map.put("JPM_D", "BC_JPM");
+		map.put("MSM_D", "BC_MSM");
+		map.put("PRREF_D", "BC_PRREF");
+		map.put("TIMEWRITE_D", "BC_TIMEWRITE");
+		map.put("ECD_230", "S4D_120");
+		map.put("INTEGRATION_ENGINE_JAVA_POD", "S4D_120");
+		map.put("GE_APM", "BC_APM");
+
+
+
+        //PI Bussiness Systems
+        map.put("BOA_P", "BC_BOA");
+        map.put("EEC_900", "S4");
+        map.put("FILEMASTER_P", "BC_HRWS");
+        map.put("RPA_P", "BC_RPA");
+        map.put("REUTERS_P", "BC_REUTERS");
+        map.put("HSBC_P", "BC_HSBC");
+        map.put("ILOGISTICS_P", "BC_DLOG");
+        map.put("JPM_P", "BC_JPM");
+        map.put("TMS_P", "BC_TMS");
+        map.put("PRREF_P", "BC_PRREF");
+        map.put("CBMP_P", "BC_CBMP");
+        map.put("PMONEDB_P", "BC_PMONEDB");
+        map.put("ReutersPost_IP", "BC_ReutersPost");
+        map.put("SendBankStatement_IP", "BC_SendBankStatement");
+        map.put("SendChequeUpdate_IP", "BC_SendChequeUpdate");
+        map.put("SendChequeUpdateDynamic_IP", "BC_SendChequeUpdateDynamic");
+        map.put("SendBankPaymentAck_IP", "BC_SendBankPaymentAck");
+
+		return map;
+	}
+
+    public void updateMetaINFfileKering(String path, String stepname) {
+        String string = null;
+        if(stepname.equalsIgnoreCase("map"))
+        {
+            string="Require-Capability: scriptcollection.SC_AEMscripts;resolution:=optional;\r\n"
+                    + " bundleType:String=\"ScriptCollection\";source:String=\"reference\",scriptco\r\n"
+                    + " llection.SC_LoggingScripts;resolution:=optional;bundleType:String=\"Scri\r\n"
+                    + " ptCollection\";source:String=\"reference\"";
+        }else
+        {
+            string = "Require-Capability: scriptcollection.SC_GetReceiverParameters;resolution\r\n"
+                    + " :=optional;bundleType:String=\"ScriptCollection\";source:String=\"referenc\r\n"
+                    + " e\",scriptcollection.SC_LookupScripts;resolution:=optional;bundleType:St\r\n"
+                    + " ring=\"ScriptCollection\";source:String=\"reference\",scriptcollection.SC_A\r\n"
+                    + " EMscripts;resolution:=optional;bundleType:String=\"ScriptCollection\";sou\r\n"
+                    + " rce:String=\"reference\",scriptcollection.SC_LoggingScripts;resolution:=o\r\n"
+                    + " ptional;bundleType:String=\"ScriptCollection\";source:String=\"reference\"";
+        }
+
+        File original = new File(path+"\\META-INF\\MANIFEST.MF");
+        File cleaned = new File(path+"\\META-INF\\temp_MANIFEST.MF");
+        try (BufferedReader reader = new BufferedReader(new FileReader(original));
+             PrintWriter writer = new PrintWriter(new FileWriter(cleaned))
+        ) {
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                if (!line.trim().isEmpty()) {
+                    writer.println(line);
+                }else {
+                    writer.println(string=string+"\n");
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        // Rename cleaned file back to original
+
+        if (original.delete() && cleaned.renameTo(original)) {
+            System.out.println("Extra newlines removed successfully.");
+        } else {
+            System.out.println("Failed to update the file.");
+        }
+
+
+    }
+	
+}
