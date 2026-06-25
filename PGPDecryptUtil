@@ -1,0 +1,403 @@
+package com.accenture.pgpEncrypitAndDecrypt;
+
+import org.bouncycastle.openpgp.*;
+import org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory;
+import org.bouncycastle.openpgp.operator.bc.BcKeyFingerprintCalculator;
+import org.bouncycastle.openpgp.operator.jcajce.JcaKeyFingerprintCalculator;
+import org.bouncycastle.openpgp.operator.jcajce.JcePBESecretKeyDecryptorBuilder;
+import org.bouncycastle.openpgp.operator.jcajce.JcePublicKeyDataDecryptorFactoryBuilder;
+import org.bouncycastle.util.io.Streams;
+import org.jsoup.Jsoup;
+
+
+import org.xml.sax.SAXException;
+import org.bouncycastle.bcpg.*;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.security.*;
+import java.security.cert.CertificateException;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
+import org.springframework.stereotype.Service;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+
+@Service
+public class PGPDecryptUtil {
+	
+	private static String secretKeyPath = "C:\\Users\\guduru.sai.k.reddy\\Downloads\\SecretKey (1).pgp";
+	private static char[] passphrase = "*Atci@1234".toCharArray(); 
+/*	public static void main(String[] args) {
+        try {
+            String encryptedMessage = "-----BEGIN PGP MESSAGE-----\r\n"
+            		+ "\r\n"
+            		+ "wcBMAwbzSFA8e73qAQf8DYueDviYvzMRW6g7I6FsTrTFoEPefsl7Rm8SC62tei8x\r\n"
+            		+ "xhHCY3WWr+hPIzBsPiwPD3KswxcahafQlKyTuEaVjyZxzBR7P6DEoMSZtTMmcWVm\r\n"
+            		+ "qMcKuEh5RiyX5Ng7xf3DeQm98T3tc6XJnBJ1T24G+kBLi6WexwHSw0JPzHlr6a9R\r\n"
+            		+ "UlfqslpRovNBPL7o3ylrZv5j/Qi/e2JqyskTdlwW3duskR1fyDAF0aI37Teh6Ena\r\n"
+            		+ "+4KWk4NmWGlHkmC9Zua1Sc3edT/FpVNfHi/8Pd62nwjX421N8kjIAAKULBvENxTZ\r\n"
+            		+ "4JSADuhR56b4dJkJoVko/mNqrt8a0Kux3OXQ7mFUI9LJrQFGvcGk0huTKhwPPqHU\r\n"
+            		+ "r6M6X455Z18KKak3BZUTAF6mxU6eP+5KwqIGuqkxY47khiYvIZj8zzvdiIUkjDpK\r\n"
+            		+ "XzgrFS85H7uJsQPH33mAp+L/laIhhu8FXUEo13b65FB9pQj7wNSVrGSs6CkyNWpq\r\n"
+            		+ "vCMcwh4WtRu5lTykJVIALEsf0weHsMkuM54jQoGzK5nx7lkeKS+j1zNilX/QE1iL\r\n"
+            		+ "PGZlwz00cguW+nbtEnFXjPK0HP0sYpE4KGgZCOWtYuIhTUs9j6cTbKon6/dyEr9+\r\n"
+            		+ "wWkNMVPLr6foK39eFnciwvdPdELdqTInLma7pXX5jloQq8vdfvfT0qLDzYmnz3wf\r\n"
+            		+ "5Pp1zURoF5zC9+gctvaZSBbZzRTTi2E8YStROsd7P4dJ09wm9nh0c6i+XlK8l4QW\r\n"
+            		+ "dcPFz3XhIBz8LtBcdGM1MdKSr3Q+DkP+cLCic1Nz2Gm3a0cJKVFx5j5/F3LEi9BR\r\n"
+            		+ "h77gFCv/JPG45LJgTodY4e0TnTE1XCEoMzKa/kphY9JWN7qzcTSV4p2Mp8COFynC\r\n"
+            		+ "c+eRskqytTeuDpx5+6Ff9EjEeC82Zzr5zeBplf7hG7plbIRZE3Yk2e3gHT3qggco\r\n"
+            		+ "cTO0a6X6cnoZAHN38h3IubJJxzaR62/Xq7V1XmGkf6XPo0Cq/6dSAZLntR5ehdpO\r\n"
+            		+ "n5gYiQZC9bK50UeWrP5HJWqoBIl1RN9PegGgIDZFSRwxrziiG9Wu2i3kN7rc6Pnf\r\n"
+            		+ "uZYJ3X56mw+DlRqxPT5+1yHpvSZUFFb5Y8NHx1JEH9D3j7lvjl5kqZ8fUaUwoayT\r\n"
+            		+ "kEp3xg4Z+cCage2lDwLK8C/kT5xSlQw8WAAtEOgYoOo40fxdbaOua8Rc6Jv7k4E4\r\n"
+            		+ "tS8MFtB3M2Zv+x5uammlbNyn69ulrlGIO+rbaKQgxV5pdMj6wcYyt6HFiHDMUwfi\r\n"
+            		+ "sIIcXi+u/vA7o9H/GD06CQ5zFA5mr88/KRJVOvqlpYhrOOA5tmR3Ggu3iLUdru5Z\r\n"
+            		+ "5sI8bX0Dj30cfa5/epzv4b013Nj3MNcIqDIHu5SWh6UjkW1oRkBsJ/CqITx/1gna\r\n"
+            		+ "EOdoAbon5iNyr0wMbmEgH+Oh8GjmIfDoqnaXqxA4BF3J2MWvbpaJnMQw5RJrSVvP\r\n"
+            		+ "GEatCoyj/3x8j5cDsLTqzIWTWN2Bm2muiQfT4YGF0skQhw4vp18sEsqUoSn1JnKm\r\n"
+            		+ "s4o5S7ZAAwCVEG66o8BEeuIgEXx00+Bf3YosKeR6xmd7FnMDoebpFIKIeQTCLTss\r\n"
+            		+ "miF06i/LY8fSa2Uci7f++ruPb3/5Mtgb94g0ivadAkvxkMSN7Tm/j0f9n64d9yAo\r\n"
+            		+ "9XVlgNQZu34Ky2BPtFPXSIdlsmJyAwRhby8ElJnXQi7lmGqdwqrU0pXKG3mND6BA\r\n"
+            		+ "yPyLJObLKXHeSa2zU74VcjnXlhXjjWB+4f0z9VhVftD8Bfq/cUF+VL1zbOywQ3hk\r\n"
+            		+ "A44poqzqZLYqPY68tX6bg8IlPWOyqX4R/xc5cW0ZO6zOybnRupza72TK9h88OcHW\r\n"
+            		+ "aYrU+4FYZFXEIigfUkRmOGEHKtMm9Da/tkxBmfJpAyCNfa0ZJZveLt+iBSZ/voH4\r\n"
+            		+ "75t3wrgl4W0SyU9mjDRSEK/AbUw8KwA+cliK5+EsevLzfUobnuiRGayRMF+bSphW\r\n"
+            		+ "WqhvhuL48sh+UKCaxKwDX8ToTk68ztCI7VFjj9eXQ7UbSugjDz54cSyCP9iQQRxY\r\n"
+            		+ "sftGF/37F7G5hLqQgEix481KheloaMqQDZJzPg1vpvS7MFIciCbCJWXxeV4NpdSo\r\n"
+            		+ "1qZWb4VT03t0M6yaUFhaxQx3G8bUqfaZS8wdjbSfyeiJdOZr4yH+RC0uPX1hNH0U\r\n"
+            		+ "+NXxA5UNXoiTaHefzM9vq+Pl/bzLkmjhPcyPZkREZEL1DAU9GTvig1tza2Bk2IhE\r\n"
+            		+ "iH26PSedgKMFxF1XcCgEfuMBmPqYb2dPBemhwHNGODVlNSQwq4zg1+j2gontf2RZ\r\n"
+            		+ "mLBzn7gZqctqjakp/pZy3Bv1096QhNX1ou3STbU+OD9ePs3DUC7ZDYXLydBf+14e\r\n"
+            		+ "mtm1FYi/iUbl5Xpmu3895tKvsr+KZQ8fBa3u/V+u6cKTM3gczmJFpp3rKBNCZ23N\r\n"
+            		+ "GeIgqqBst/JoR87Hw14Flv5AVvcV6uT5jjxoxnMeyq1x1f4y0MlgY55kmKtN03ru\r\n"
+            		+ "oFLJTIV8pDL1SJ1it58BQ3cn/mSrLrJIxV7tBt7FUMY8Ts4yVbUKLs7DVStk3Nrj\r\n"
+            		+ "aRr3Ifet5hhaVU3IpVaxFnsi8FUE6si04o5kINFJNiRDelT2O/O1ef/3/JV6FBKm\r\n"
+            		+ "Tv+/gyRY1MkRjdhnaC4yr1D1MaKCPcQ4rXqYI/zYt3waFAJvRyfYDss7aba/yPWq\r\n"
+            		+ "RjCU7fEBoP4psMVw3k3z/g83Ogcu6+FXVLksWu/ZjFNkNX1ee7JyQPXcCvHM4MC4\r\n"
+            		+ "pkYlh+24zffoOW2BKvyhp2bckQtdW1a0afN7eCWycW17lHM6EKKOvd7lxhyecAFN\r\n"
+            		+ "22f4p1VsGst1qSr0F9Aw0WlrH09xHCQU3SBROrN8ZvOkGJ1VN4sIL/yUDQj3DZXI\r\n"
+            		+ "B4yYacbTt3oIR1G2CR11ar5wIQVcEwHYjFm+r4b3P77GbRcdLSWiQFDKuE1RUqF0\r\n"
+            		+ "EB77MVgodj8ZBDuJ7SE2S5aXheumqf1nV3QdVEK0Q2v7TL2b1DOUhFkdG04ZsjYp\r\n"
+            		+ "lUuP0PDvz79wAfS+eFpd7fL0jJVGtMLITWJz7ijWPBMeriP7drPnDzdi7J3F9OkG\r\n"
+            		+ "+JVGf8IECPCVOss9wRA/JFCwMEmTHsPr85YcnXAJGYBlavk35sLtPkKGTy3lfoNn\r\n"
+            		+ "0Edk1m9Y/CdbcIeSzjBr7/1QLgpgnkTDaL/3RVrsz8nNUBSUY7dWj5bsd3DePw7i\r\n"
+            		+ "q+9V2bAFvtQVJfF7n0mjEdx1lpr44JgUDkGfT84hWt0wK83eWq741FuVlE2pul+x\r\n"
+            		+ "m7ZAcwVx0cH1crWRelvw35cpgVgn6kdKmsyzYB2X2F28fh82F5FiMGIjBZzLJ4cH\r\n"
+            		+ "SAvbCIZXfki+dBQuw2kZlXqtWzILajCmg8opKS44CzgPGyVN8GY1jUVajw74dYNB\r\n"
+            		+ "t1r1Ekrv44cCKHseb0Op4WTH53mvGXfTMqmSEQy9SvGEY5NTdgnDr/VSknpKiZel\r\n"
+            		+ "IlAzlU2Rb14Gkjk/W/316DHQxvD3Mb+XWKzo44Fh1RsfeR9OcAWU8n8HzfnFWTtB\r\n"
+            		+ "kTMYHuxvdX2Xg0zeSXf0mo1VWwp/VQo7RpIkK0E3e2Wm3iwdGuerYcwZkteO8lT9\r\n"
+            		+ "5d4XBL8heh8NALo8SAPSqU//GeeIRzySxx4e0W5Rd6Mp+mwQBpFZbcYfUPWjD60J\r\n"
+            		+ "q8sgTJDCanlUxOsxpi8Tj0lNAPaU1Isw1V/sU2qeMGue+SpjEcNNB6ZI4gdBOF7O\r\n"
+            		+ "edXfh3daZPBNIjFhnERYrP6w6zYdjVfnn/91aJZJocC3arUSt0szdixzhS6CXhIE\r\n"
+            		+ "FKxr6gc2xjnRnqNS2XgFtvYutIr5aXUJwNhH7osySC8fNA4cB/1E0aMnoOzLU/oA\r\n"
+            		+ "UEr3TWCYxtnV0G7KsxBfL+NavnYjchdFLXv5yeuV/uK5Dg9n0YuOnRT/KOfN+8bh\r\n"
+            		+ "YuPx88twXxBbhfUVOeNK\r\n"
+            		+ "=eeu3\r\n"
+            		+ "-----END PGP MESSAGE-----";  // Your PGP encrypted message here
+            String secretKeyPath = "C:\\Users\\guduru.sai.k.reddy\\Downloads\\SecretKey (1).pgp";
+            String outputPath = "C:\\Users\\guduru.sai.k.reddy\\Downloads\\SecretKey_output.zip";// Path to your secret key
+            char[] passphrase = "*Atci@1234".toCharArray();  // The passphrase for your secret key
+
+            //decryptFile(encryptedMessage, secretKeyPath, passphrase,outputPath);
+            Document doc = decryptFile(encryptedMessage);
+            System.out.println("Decrypted message: ");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    } */
+	 
+	static {
+	        // Register BouncyCastle as a security provider
+	        Security.addProvider(new BouncyCastleProvider());
+	    }
+
+	
+
+	
+
+	public static Document decryptFile(String encryptedInputFileName) throws IOException, PGPException, ParserConfigurationException, SAXException {
+        Document document = null;
+        InputStream in = null;
+        InputStream keyIn = null;
+        PGPPrivateKey sKey = null;
+        PGPPublicKeyEncryptedData pbe = null;
+        PGPSecretKeyRingCollection pgpSec = null;
+        
+        try {
+            // Input stream for encrypted file
+            in = new BufferedInputStream(new ByteArrayInputStream(encryptedInputFileName.getBytes(StandardCharsets.UTF_8)));
+            keyIn = new BufferedInputStream(new FileInputStream(secretKeyPath));
+
+            in = PGPUtil.getDecoderStream(in);
+
+            // Initialize PGP object factory to parse the encrypted data
+            JcaPGPObjectFactory pgpF = new JcaPGPObjectFactory(in);
+            PGPEncryptedDataList enc;
+            Object o = pgpF.nextObject();
+
+            // Handle encrypted data objects
+            if (o instanceof PGPEncryptedDataList) {
+                enc = (PGPEncryptedDataList) o;
+            } else {
+                enc = (PGPEncryptedDataList) pgpF.nextObject();
+            }
+
+            Iterator<?> it = enc.getEncryptedDataObjects();
+            pgpSec = new PGPSecretKeyRingCollection(PGPUtil.getDecoderStream(keyIn), new JcaKeyFingerprintCalculator());
+
+            // Find the private key that matches the encrypted key
+            while (sKey == null && it.hasNext()) {
+                pbe = (PGPPublicKeyEncryptedData) it.next();
+                PGPSecretKey pgpSecKey = pgpSec.getSecretKey(pbe.getKeyID());
+
+                if (pgpSecKey != null) {
+                    sKey = pgpSecKey.extractPrivateKey(new JcePBESecretKeyDecryptorBuilder().setProvider("BC").build(passphrase));
+                }
+            }
+
+            // Decrypt the data stream
+            InputStream clear = pbe.getDataStream(new JcePublicKeyDataDecryptorFactoryBuilder().setProvider("BC").build(sKey));
+            JcaPGPObjectFactory plainFact = new JcaPGPObjectFactory(clear);
+            Object message = plainFact.nextObject();
+
+            // Handle compressed data
+            if (message instanceof PGPCompressedData) {
+                PGPCompressedData cData = (PGPCompressedData) message;
+                JcaPGPObjectFactory pgpFact = new JcaPGPObjectFactory(cData.getDataStream());
+                message = pgpFact.nextObject();
+            }
+
+            // Extract the literal data
+            if (message instanceof PGPLiteralData) {
+                PGPLiteralData ld = (PGPLiteralData) message;
+                InputStream unc = ld.getInputStream();
+
+                // Unzip the data and read it as a string
+                String fileContent = unzipToString(unc);
+                System.out.println(fileContent);
+                document = (Document) Jsoup.parse(fileContent);
+                System.out.println("Unzipped Content: ");
+            }
+
+            // Verify integrity
+            if (pbe.isIntegrityProtected() && pbe.verify()) {
+                System.out.println("Integrity Verified");
+            } else {
+                System.out.println("Integrity Not Verified");
+            }
+        } finally {
+            // Close all streams to avoid memory leaks
+            if (in != null) {
+                in.close();
+            }
+            if (keyIn != null) {
+                keyIn.close();
+            }
+            
+        }
+
+        return document;
+    }
+         
+	     
+	    public static InputStream decryptFile(InputStream inputStream) throws IOException, PGPException, ParserConfigurationException, SAXException {
+	         // Input stream for encrypted file
+	    	String fileContent=null;
+	    	BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+	        StringBuilder result = new StringBuilder();
+	        String line;
+	        
+	        while ((line = reader.readLine()) != null) {
+	            result.append(line).append(System.lineSeparator());
+	        }
+	        
+	        reader.close();
+	    	
+	    	
+	    	 
+	         InputStream in = new BufferedInputStream(new ByteArrayInputStream(result.toString().getBytes(StandardCharsets.UTF_8)));
+	         InputStream keyIn = new BufferedInputStream(new FileInputStream(secretKeyPath));
+
+	         in = PGPUtil.getDecoderStream(in);
+
+	         // Initialize PGP object factory to parse the encrypted data
+	         JcaPGPObjectFactory pgpF = new JcaPGPObjectFactory(in);
+	         PGPEncryptedDataList enc;
+	         Object o = pgpF.nextObject();
+
+	         // Handle encrypted data objects
+	         if (o instanceof PGPEncryptedDataList) {
+	             enc = (PGPEncryptedDataList) o;
+	         } else {
+	             enc = (PGPEncryptedDataList) pgpF.nextObject();
+	         }
+
+	         Iterator it = enc.getEncryptedDataObjects();
+	         PGPPrivateKey sKey = null;
+	         PGPPublicKeyEncryptedData pbe = null;
+	         PGPSecretKeyRingCollection pgpSec = new PGPSecretKeyRingCollection(PGPUtil.getDecoderStream(keyIn), new JcaKeyFingerprintCalculator());
+
+	         while (sKey == null && it.hasNext()) {
+	             pbe = (PGPPublicKeyEncryptedData) it.next();
+	             PGPSecretKey pgpSecKey = pgpSec.getSecretKey(pbe.getKeyID());
+
+	             if (pgpSecKey != null) {
+	                 sKey = pgpSecKey.extractPrivateKey(new JcePBESecretKeyDecryptorBuilder().setProvider("BC").build(passphrase));
+	             }
+	         }
+
+	         // Decrypt the data stream
+	         InputStream clear = pbe.getDataStream(new JcePublicKeyDataDecryptorFactoryBuilder().setProvider("BC").build(sKey));
+	         JcaPGPObjectFactory plainFact = new JcaPGPObjectFactory(clear);
+	         Object message = plainFact.nextObject();
+
+	         if (message instanceof PGPCompressedData) {
+	             PGPCompressedData cData = (PGPCompressedData) message;
+	             JcaPGPObjectFactory pgpFact = new JcaPGPObjectFactory(cData.getDataStream());
+	             message = pgpFact.nextObject();
+	         }
+
+	         if (message instanceof PGPLiteralData) {
+	             PGPLiteralData ld = (PGPLiteralData) message;
+//	             String outFileName = defaultFileName;  // Use the default file name for saving the unzipped content
+
+	             InputStream unc = ld.getInputStream();
+
+	             // Unzip the data and read it as a string
+	             fileContent = unzipToString(unc);
+	             System.out.println(fileContent);
+	             System.out.println("Unzipped Content: ");
+	             //
+	         }
+
+	         // Verify integrity
+	         if (pbe.isIntegrityProtected() && pbe.verify()) {
+	             System.out.println("Integrity Verified");
+	         } else {
+	             System.out.println("Integrity Not Verified");
+	         }
+	         
+	         return new java.io.ByteArrayInputStream(fileContent.getBytes());
+	     }
+
+	     
+	     
+	     
+	     
+	     // Helper method to unzip and return the content as a string
+	     private static String unzipToString(InputStream zipStream) throws IOException {
+	         StringBuilder stringBuilder = new StringBuilder();
+	         ZipInputStream zis = new ZipInputStream(zipStream);
+	         ZipEntry entry;
+
+	         // Read the zip entry content
+	         while ((entry = zis.getNextEntry()) != null) {
+	             // Read the content of each file inside the zip entry
+	             BufferedReader reader = new BufferedReader(new InputStreamReader(zis, StandardCharsets.UTF_8));
+	             String line;
+	             while ((line = reader.readLine()) != null) {
+	                 stringBuilder.append(line).append("\n");
+	             }
+	             zis.closeEntry();
+	         }
+	         zis.close();
+	         return stringBuilder.toString();
+	     }
+	     
+	     public static String decryptString(String encryptedInputFileName) throws IOException, PGPException, ParserConfigurationException, SAXException {
+	         Document document = null;
+	         InputStream in = null;
+	         InputStream keyIn = null;
+	         PGPPrivateKey sKey = null;
+	         PGPPublicKeyEncryptedData pbe = null;
+	         PGPSecretKeyRingCollection pgpSec = null;
+	         String fileContent = "";
+	         
+	         try {
+	             // Input stream for encrypted file
+	             in = new BufferedInputStream(new ByteArrayInputStream(encryptedInputFileName.getBytes(StandardCharsets.UTF_8)));
+	             keyIn = new BufferedInputStream(new FileInputStream(secretKeyPath));
+
+	             in = PGPUtil.getDecoderStream(in);
+
+	             // Initialize PGP object factory to parse the encrypted data
+	             JcaPGPObjectFactory pgpF = new JcaPGPObjectFactory(in);
+	             PGPEncryptedDataList enc;
+	             Object o = pgpF.nextObject();
+
+	             // Handle encrypted data objects
+	             if (o instanceof PGPEncryptedDataList) {
+	                 enc = (PGPEncryptedDataList) o;
+	             } else {
+	                 enc = (PGPEncryptedDataList) pgpF.nextObject();
+	             }
+
+	             Iterator<?> it = enc.getEncryptedDataObjects();
+	             pgpSec = new PGPSecretKeyRingCollection(PGPUtil.getDecoderStream(keyIn), new JcaKeyFingerprintCalculator());
+
+	             // Find the private key that matches the encrypted key
+	             while (sKey == null && it.hasNext()) {
+	                 pbe = (PGPPublicKeyEncryptedData) it.next();
+	                 PGPSecretKey pgpSecKey = pgpSec.getSecretKey(pbe.getKeyID());
+
+	                 if (pgpSecKey != null) {
+	                     sKey = pgpSecKey.extractPrivateKey(new JcePBESecretKeyDecryptorBuilder().setProvider("BC").build(passphrase));
+	                 }
+	             }
+
+	             // Decrypt the data stream
+	             InputStream clear = pbe.getDataStream(new JcePublicKeyDataDecryptorFactoryBuilder().setProvider("BC").build(sKey));
+	             JcaPGPObjectFactory plainFact = new JcaPGPObjectFactory(clear);
+	             Object message = plainFact.nextObject();
+
+	             // Handle compressed data
+	             if (message instanceof PGPCompressedData) {
+	                 PGPCompressedData cData = (PGPCompressedData) message;
+	                 JcaPGPObjectFactory pgpFact = new JcaPGPObjectFactory(cData.getDataStream());
+	                 message = pgpFact.nextObject();
+	             }
+
+	             // Extract the literal data
+	             if (message instanceof PGPLiteralData) {
+	                 PGPLiteralData ld = (PGPLiteralData) message;
+	                 InputStream unc = ld.getInputStream();
+
+	                 // Unzip the data and read it as a string
+	                 fileContent = unzipToString(unc);
+	                 System.out.println(fileContent);
+	                 System.out.println("Unzipped Content: ");
+	             }
+
+	             // Verify integrity
+	             if (pbe.isIntegrityProtected() && pbe.verify()) {
+	                 System.out.println("Integrity Verified");
+	             } else {
+	                 System.out.println("Integrity Not Verified");
+	             }
+	         } finally {
+	             // Close all streams to avoid memory leaks
+	             if (in != null) {
+	                 in.close();
+	             }
+	             if (keyIn != null) {
+	                 keyIn.close();
+	             }
+	             
+	         }
+
+	         return fileContent;
+	     }
+	     
+	 
+
+}
